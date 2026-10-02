@@ -1,0 +1,11 @@
+name = "spr-heartbeat-publisher"
+main = "src/index.js"
+compatibility_date = "2026-10-02"
+workers_dev = true
+
+[vars]
+UPDATER_STATUS_URL = "https://www.bodgybros.com/sps/updater-status.json"
+MAX_AGE_SECONDS = "7200"
+
+[triggers]
+crons = ["0 * * * *"]
