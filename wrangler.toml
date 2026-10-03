@@ -9,3 +9,7 @@ MAX_AGE_SECONDS = "7200"
 
 [triggers]
 crons = ["0 * * * *"]
+
+[[kv_namespaces]]
+binding = "SPR_COMMANDS"
+id = "389b0466caae47979a1cdbda5985aa24"
