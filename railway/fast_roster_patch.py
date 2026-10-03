@@ -112,22 +112,22 @@ old="""                try:
 new="""                try:
                     discovered=[]
                     try:
-                        rr=page.context.request.get(depot_url,timeout=15000,fail_on_status_code=False)
+                        rr=page.context.request.get(depot_url,timeout=8000,fail_on_status_code=False)
                         if rr.ok:
-                            discovered=_fast_roster_items_from_html(rr.text(),depot_url)
+                            discovered=_fast_roster_items_from_html(rr.text(),depot_url)\n                            # SharePoint may encode these in embedded web-part JSON; parse that\n                            # from the response body without navigating the visible page.\n                            if len(discovered) < 6:\n                                try:\n                                    discovered += _sharepoint_embedded_roster_items_from_html(rr.text(),depot_url)\n                                except Exception:\n                                    pass
                     except Exception as e:
                         print(f"    Direct depot read failed quickly: {e}",flush=True)
                     missing=[f"{role} {period}" for role in roles for period in periods if not pick_pdf(discovered,role,period)]
                     if missing:
-                        print(f"    Direct roster discovery missing {len(missing)} target(s); trying page for up to 20s.",flush=True)
+                        print(f"    Direct roster discovery missing {len(missing)} target(s); trying page for up to 8s.",flush=True)
                         _set_online_progress(f"Roster update: {depot_name} ({depot_index}/{len(depots)}) — short fallback discovery")
                         try:
-                            page.goto(depot_url,wait_until='domcontentloaded',timeout=20000)
+                            page.goto(depot_url,wait_until='domcontentloaded',timeout=8000)
                         except Exception as nav_error:
                             try: page.evaluate("window.stop()")
                             except Exception: pass
                             print(f"    Depot page fallback stopped: {nav_error}",flush=True)
-                        page.wait_for_timeout(300)
+                        page.wait_for_timeout(150)
                         # Do not call the expensive DOM/frame scanners here. On a slow
                         # SharePoint page they can spend several minutes walking virtualised
                         # rows. The six PDF URLs are present in the rendered HTML once the
