@@ -13,11 +13,19 @@ old='''    # Mirror all TCREW roster PDFs after the SPR browser has closed becau
         results.append({"role":"Rosters","message":"ERROR: "+str(e)})
     return results
 '''
-new='''    # Mirror TCREW rosters for scheduled/combined updates. Manual SPR-only
+new='''    # Record the SPR completion before roster mirroring starts.
+    spr_ok = all("ERROR:" not in str(x.get("message","")) for x in results if isinstance(x,dict))
+    if spr_ok:
+        _record_online_success("spr")
+
+    # Mirror TCREW rosters for scheduled/combined updates. Manual SPR-only
     # commands deliberately skip this so the two Admin buttons stay separate.
     if include_rosters:
         try:
-            results.append(sync_all_rosters_online())
+            roster_result=sync_all_rosters_online()
+            results.append(roster_result)
+            if "ERROR:" not in str(roster_result.get("message","")):
+                _record_online_success("rosters")
         except Exception as e:
             results.append({"role":"Rosters","message":"ERROR: "+str(e)})
     return results
@@ -34,6 +42,21 @@ ONLINE_CANCEL_EVENT = threading.Event()\nONLINE_PROCESS_STARTED_AT = int(time.ti
 def _check_online_cancel():
     if ONLINE_CANCEL_EVENT.is_set():
         raise RuntimeError("Update cancelled")
+
+def _record_online_success(command):
+    command=str(command or "").lower()
+    key=str(os.environ.get("SPR_COMMAND_KEY") or "")
+    if command not in ("spr","rosters") or not key:
+        return
+    try:
+        requests.post(
+            _online_control_endpoint()+"/worker/success",
+            headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"SPR-Online-Updater/627"},
+            json={"command":command,"completed_at":int(time.time())},
+            timeout=(2,4),
+        ).raise_for_status()
+    except Exception as e:
+        print("Online updater success timestamp report failed:",e,flush=True)
 
 def _set_online_progress(message):
     message=str(message or "")[:500]
