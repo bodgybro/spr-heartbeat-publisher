@@ -54,7 +54,12 @@ def updater_status_heartbeat_worker():
             if msg!=last_error:
                 print("Cloudflare updater status publish failed:",msg,flush=True)
                 last_error=msg
-        time.sleep(20)
+        # Use fewer Cloudflare KV writes while idle; keep active updates responsive.
+        try:
+            active=bool(_job_snapshot().get("running"))
+        except Exception:
+            active=False
+        time.sleep(20 if active else 60)
 '''
 
 def remove_top_level_func(text,name):
