@@ -162,41 +162,43 @@ s=replace_top_level_func(s,"_job_message",'''def _job_message(snapshot=None):
         return str(j.get("error"))[:800]
     return "Online updater ready"''')
 
-s=replace_top_level_func(s,"publish_updater_status",'''def publish_updater_status():
-    """Publish updater heartbeat directly to Cloudflare, not cPanel port 2083."""
-    key=str(os.environ.get("SPR_COMMAND_KEY") or "")
-    if not key:
-        return False
-    payload=_status_payload()
-    snap=_job_snapshot()
-    payload["build"]=620
-    payload["message"]=_job_message(snap)
-    payload["progress"]=str(snap.get("progress") or "")[:500]
-    r=requests.post(
-        _online_control_endpoint()+"/worker/heartbeat",
-        headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"SPR-Online-Updater/620"},
-        json=payload,
-        timeout=(5,20),
-    )
-    r.raise_for_status()
-    return True''')
+if "def publish_updater_status(" in s:
+    s=replace_top_level_func(s,"publish_updater_status",'''def publish_updater_status():
+        """Publish updater heartbeat directly to Cloudflare, not cPanel port 2083."""
+        key=str(os.environ.get("SPR_COMMAND_KEY") or "")
+        if not key:
+            return False
+        payload=_status_payload()
+        snap=_job_snapshot()
+        payload["build"]=620
+        payload["message"]=_job_message(snap)
+        payload["progress"]=str(snap.get("progress") or "")[:500]
+        r=requests.post(
+            _online_control_endpoint()+"/worker/heartbeat",
+            headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"SPR-Online-Updater/620"},
+            json=payload,
+            timeout=(5,20),
+        )
+        r.raise_for_status()
+        return True''')
 
-s=replace_top_level_func(s,"updater_status_heartbeat_worker",'''def updater_status_heartbeat_worker():
-    if not str(os.environ.get("SPR_COMMAND_KEY") or ""):
-        print("Updater status publisher disabled: SPR_COMMAND_KEY is not configured.",flush=True)
-        return
-    print("Updater status publisher enabled via Cloudflare.",flush=True)
-    last_error=""
-    while True:
-        try:
-            publish_updater_status()
-            last_error=""
-        except Exception as e:
-            msg=str(e)
-            if msg!=last_error:
-                print("Cloudflare updater status publish failed:",msg,flush=True)
-                last_error=msg
-        time.sleep(20)''')
+if "def updater_status_heartbeat_worker(" in s:
+    s=replace_top_level_func(s,"updater_status_heartbeat_worker",'''def updater_status_heartbeat_worker():
+        if not str(os.environ.get("SPR_COMMAND_KEY") or ""):
+            print("Updater status publisher disabled: SPR_COMMAND_KEY is not configured.",flush=True)
+            return
+        print("Updater status publisher enabled via Cloudflare.",flush=True)
+        last_error=""
+        while True:
+            try:
+                publish_updater_status()
+                last_error=""
+            except Exception as e:
+                msg=str(e)
+                if msg!=last_error:
+                    print("Cloudflare updater status publish failed:",msg,flush=True)
+                    last_error=msg
+            time.sleep(20)''')
 
 s=replace_top_level_func(s,"_report_online_result",'''def _report_online_result(trigger_id=""):
     if not trigger_id:
