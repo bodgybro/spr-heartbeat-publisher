@@ -45,7 +45,7 @@ async function status(env) {
     message, last_update: upstream?.last_update || 0,
     last_ok: upstream?.last_ok ?? null,
     last_message: upstream?.last_message || "",
-    build: upstream?.build || 613,
+    build: upstream?.build || 613,\n    command_pending: Boolean(await env.SPR_COMMANDS?.get("pending")),
   };
 }
 
