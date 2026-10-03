@@ -29,6 +29,11 @@ s=s.replace(old,new,1)
 # Live progress helper. It updates the local job snapshot and, for manual
 # commands, sends the current step to the Cloudflare command record.
 ACTIVE_HELPER='''ACTIVE_ONLINE_COMMAND_ID = ""
+ONLINE_CANCEL_EVENT = threading.Event()
+
+def _check_online_cancel():
+    if ONLINE_CANCEL_EVENT.is_set():
+        raise RuntimeError("Update cancelled")
 
 def _set_online_progress(message):
     message=str(message or "")[:500]
@@ -53,9 +58,9 @@ s=s.replace("\ndef start_background_update(", "\n"+ACTIVE_HELPER+"\ndef start_ba
 # Add useful progress checkpoints without changing the update logic.
 s=s.replace("            for depot in depots:", "            for depot_index, depot in enumerate(depots, 1):", 1)
 s=s.replace('                print(f"  Depot: {depot_name}", flush=True)',
-            '                print(f"  Depot: {depot_name}", flush=True)\n                _set_online_progress(f"Roster update: {depot_name} ({depot_index}/{len(depots)} depots)")', 1)
+            '                print(f"  Depot: {depot_name}", flush=True)\n                _check_online_cancel()\n                _set_online_progress(f"Roster update: {depot_name} ({depot_index}/{len(depots)} depots)")', 1)
 s=s.replace('                            print(f"    [DOWNLOAD] {role} {period}: {pdf_name}", flush=True)',
-            '                            _set_online_progress(f"Roster update: {depot_name} ({depot_index}/{len(depots)}) — {role} {period}")\n                            print(f"    [DOWNLOAD] {role} {period}: {pdf_name}", flush=True)', 1)
+            '                            _check_online_cancel()\n                            _set_online_progress(f"Roster update: {depot_name} ({depot_index}/{len(depots)}) — {role} {period}")\n                            print(f"    [DOWNLOAD] {role} {period}: {pdf_name}", flush=True)', 1)
 s=s.replace('                print(f"Checking {role}: today and all future dated folders...")',
             '                print(f"Checking {role}: today and all future dated folders...")\n                _set_online_progress(f"SPR update: checking {role}")', 1)
 s=s.replace('                        print(f"  [DOWNLOAD] {role}: {exact_name}",flush=True)',
@@ -220,8 +225,7 @@ s=replace_top_level_func(s,"_report_online_result",'''def _report_online_result(
 
 s=replace_top_level_func(s,"online_control_worker",'''def online_control_worker():
     """Poll the Cloudflare command queue and run authenticated manual updates."""
-    global ACTIVE_ONLINE_COMMAND_ID
-    endpoint=_online_control_endpoint()
+    global ACTIVE_ONLINE_COMMAND_ID\n    endpoint=_online_control_endpoint()
     key=str(os.environ.get("SPR_COMMAND_KEY") or "")
     if not key:
         print("Online updater control disabled: SPR_COMMAND_KEY is not configured.",flush=True)
@@ -238,13 +242,20 @@ s=replace_top_level_func(s,"online_control_worker",'''def online_control_worker(
                 tid=str(cmd.get("id") or "")
                 kind=str(cmd.get("command") or "").lower()
                 if tid and kind in ("spr","rosters"):
-                    ACTIVE_ONLINE_COMMAND_ID=tid
-                    if start_background_update(scheduler_site_url(), mode=kind):
+                    ONLINE_CANCEL_EVENT.clear()\n                    ACTIVE_ONLINE_COMMAND_ID=tid\n                    if start_background_update(scheduler_site_url(), mode=kind):
                         active_trigger=tid
                         _set_online_progress(("Roster" if kind=="rosters" else "SPR")+" update starting…")
                         print(f"Manual online {kind} update requested from Admin.",flush=True)
                     else:
                         ACTIVE_ONLINE_COMMAND_ID=""
+            if active_trigger:
+                try:
+                    cr=requests.get(endpoint+"/worker/cancel?id="+active_trigger,headers=headers,timeout=(3,8))
+                    if cr.ok and cr.json().get("cancelled"):
+                        ONLINE_CANCEL_EVENT.set()
+                        _set_online_progress("Cancelling update…")
+                except Exception:
+                    pass
             snap=_job_snapshot()
             if active_trigger and snap.get("done") and not snap.get("running"):
                 _report_online_result(active_trigger)
