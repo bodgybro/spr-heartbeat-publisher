@@ -72,6 +72,35 @@ def replace_top_level_func(text,name,replacement):
     end=min(candidates) if candidates else len(text)
     return text[:start]+replacement.rstrip()+"\n\n"+text[end:]
 
+s=replace_top_level_func(s,"_wait_for_sharepoint_signin",'''def _wait_for_sharepoint_signin(page, timeout_seconds=300):
+    """Wait for interactive Microsoft sign-in and expose that state to SPR Search."""
+    if _sharepoint_session_ready(page):
+        return
+    try:
+        LOGIN_MARKER.unlink()
+    except Exception:
+        pass
+    _set_online_progress("SharePoint sign-in required — open the online updater browser and complete Microsoft sign-in/MFA")
+    print("", flush=True)
+    print("============================================================", flush=True)
+    print("SHAREPOINT SIGN-IN REQUIRED", flush=True)
+    print("Complete Microsoft sign-in / MFA in the online updater browser.", flush=True)
+    print("SPR Search will continue automatically after sign-in.", flush=True)
+    print("============================================================", flush=True)
+    deadline=time.time()+timeout_seconds
+    while time.time()<deadline:
+        if _sharepoint_session_ready(page):
+            try:
+                LOGIN_MARKER.write_text("SharePoint login confirmed\\n",encoding="utf-8")
+            except Exception:
+                pass
+            _set_online_progress("SharePoint sign-in restored — continuing update")
+            print("SharePoint sign-in detected. Continuing update.", flush=True)
+            return
+        page.wait_for_timeout(1000)
+    _set_online_progress("SharePoint sign-in timed out — Microsoft sign-in/MFA is required")
+    raise RuntimeError("Timed out waiting for Microsoft SharePoint sign-in/MFA on the updater browser.")''')
+
 s=replace_top_level_func(s,"start_background_update",'''def start_background_update(site, mode="all"):
     with JOB_LOCK:
         if JOB["running"]:
