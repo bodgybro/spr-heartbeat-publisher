@@ -32,6 +32,33 @@ def _fast_roster_items_from_html(raw_html, current_url):
                 pass
     return found
 
+def _run_with_hard_timeout(fn, seconds, label):
+    """Run a blocking cache/upload operation with a hard wall-clock timeout."""
+    import concurrent.futures
+    pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut=pool.submit(fn)
+    try:
+        return fut.result(timeout=seconds)
+    except concurrent.futures.TimeoutError:
+        fut.cancel()
+        raise TimeoutError(f"{label} timed out after {seconds}s")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+def _store_roster_fast(pdf_url,pdf_name,data,cache_path):
+    last=None
+    for attempt in range(2):
+        try:
+            return _run_with_hard_timeout(
+                lambda: upload_cached_roster_pdf(pdf_url,pdf_name,data,cache_path),
+                15,
+                f"Roster cache upload {pdf_name}"
+            )
+        except Exception as e:
+            last=e
+            print(f"    [UPLOAD RETRY {attempt+1}/2] {pdf_name}: {e}",flush=True)
+    raise RuntimeError(f"Could not store {pdf_name}: {last}")
+
 def _download_roster_pdf_fast(page, pdf_url, pdf_name):
     """Download a roster directly with the authenticated browser request context.
     Never navigate the visible SharePoint page to a PDF viewer."""
@@ -127,7 +154,7 @@ old2="""                            pdf=download_with_browser(page,{'href':pdf_u
                             data=pdf.read_bytes()
                             try: pdf.unlink()
                             except Exception: pass
-                            upload_cached_roster_pdf(pdf_url,pdf_name,data,cache_path)
+                            _store_roster_fast(pdf_url,pdf_name,data,cache_path)
                             pdf_count+=1
                             print(f"    [STORED] {cache_path}", flush=True)
                             # The download action can leave the page elsewhere on some
