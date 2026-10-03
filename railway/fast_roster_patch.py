@@ -77,13 +77,13 @@ def _download_roster_pdf_fast(page, pdf_url, pdf_name):
     raise RuntimeError(f"Could not download {pdf_name} directly from SharePoint: {last}")
 '''
 
-insert_at=s.find("def sync_all_rosters_online():")
+insert_at=s.rfind("def sync_all_rosters_online():")
 if insert_at<0:
     raise SystemExit("sync_all_rosters_online not found")
 if "def _fast_roster_items_from_html(" not in s:
     s=s[:insert_at]+helper+"\n"+s[insert_at:]
 
-start=s.find("def sync_all_rosters_online():")
+start=s.rfind("def sync_all_rosters_online():")
 end=s.find("\ndef run_update(",start)
 if end<0:
     raise SystemExit("run_update boundary not found")
