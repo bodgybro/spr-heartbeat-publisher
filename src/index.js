@@ -56,6 +56,7 @@ async function status(env) {
     command_pending: Boolean(pending),
     command_type: pending?.command || "",
     command_state: pending ? ((pending.claimed_at || upstream?.state === "updating") ? "running" : "queued") : "",
+    command_progress: pending?.progress || "",
   };
 }
 
@@ -112,12 +113,32 @@ async function commandResult(request, env) {
         command: pending.command,
         created_at: pending.created_at || 0,
         claimed_at: pending.claimed_at || 0,
+        progress: pending.progress || "",
+        progress_at: pending.progress_at || 0,
       });
     }
   }
   const resultRaw = await env.SPR_COMMANDS.get("result:" + id);
   if (resultRaw) return json({ok:true,state:"done",result:JSON.parse(resultRaw)});
   return json({ok:true,state:"unknown"});
+}
+
+async function progressCommand(request, env) {
+  if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
+  let body;
+  try { body = await request.json(); } catch { return json({ok:false,error:"invalid_json"},400); }
+  const id = String(body?.id || "");
+  const progress = String(body?.progress || "").slice(0, 500);
+  if (!id || !progress) return json({ok:false,error:"invalid_progress"},400);
+  const raw = await env.SPR_COMMANDS.get("pending");
+  if (!raw) return json({ok:false,error:"not_pending"},404);
+  const pending = JSON.parse(raw);
+  if (pending.id !== id) return json({ok:false,error:"wrong_command"},409);
+  pending.progress = progress;
+  pending.progress_at = Math.floor(Date.now()/1000);
+  if (!pending.claimed_at) pending.claimed_at = pending.progress_at;
+  await env.SPR_COMMANDS.put("pending", JSON.stringify(pending), { expirationTtl: 3600 });
+  return json({ok:true});
 }
 
 async function ackCommand(request, env) {
@@ -149,6 +170,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/command") return queueCommand(request, env);
     if (request.method === "GET" && url.pathname === "/worker/poll") return pollCommand(request, env);
     if (request.method === "GET" && url.pathname === "/worker/result") return commandResult(request, env);
+    if (request.method === "POST" && url.pathname === "/worker/progress") return progressCommand(request, env);
     if (request.method === "POST" && url.pathname === "/worker/ack") return ackCommand(request, env);
     return new Response("Not found", { status: 404 });
   },
