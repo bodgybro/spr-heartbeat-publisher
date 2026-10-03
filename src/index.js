@@ -215,6 +215,17 @@ async function progressCommand(request, env) {
   return json({ok:true});
 }
 
+async function recordSuccess(request, env) {
+  if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
+  let body;
+  try { body = await request.json(); } catch { return json({ok:false,error:"invalid_json"},400); }
+  const command = String(body?.command || "").toLowerCase();
+  if (!["spr","rosters"].includes(command)) return json({ok:false,error:"invalid_command"},400);
+  const completedAt = Number(body?.completed_at || Math.floor(Date.now()/1000));
+  await env.SPR_COMMANDS.put("last_success:" + command, String(completedAt));
+  return json({ok:true,command,completed_at:completedAt});
+}
+
 async function ackCommand(request, env) {
   if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
   let body;
@@ -256,6 +267,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/worker/result") return commandResult(request, env);
     if (request.method === "POST" && url.pathname === "/worker/heartbeat") return heartbeatWorker(request, env);
     if (request.method === "POST" && url.pathname === "/worker/progress") return progressCommand(request, env);
+    if (request.method === "POST" && url.pathname === "/worker/success") return recordSuccess(request, env);
     if (request.method === "POST" && url.pathname === "/worker/ack") return ackCommand(request, env);
     return new Response("Not found", { status: 404 });
   },
