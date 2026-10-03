@@ -100,13 +100,19 @@ new="""                try:
                             try: page.evaluate("window.stop()")
                             except Exception: pass
                             print(f"    Depot page fallback stopped: {nav_error}",flush=True)
-                        page.wait_for_timeout(500)
-                        discovered += _sharepoint_embedded_roster_items(page,depot_url)
-                        missing=[f"{role} {period}" for role in roles for period in periods if not pick_pdf(discovered,role,period)]
-                        if missing:
-                            discovered += _sharepoint_rendered_items(page,depot_url)
-                    if not discovered:
-                        raise RuntimeError("No roster PDF targets found")
+                        page.wait_for_timeout(300)
+                        # Do not call the expensive DOM/frame scanners here. On a slow
+                        # SharePoint page they can spend several minutes walking virtualised
+                        # rows. The six PDF URLs are present in the rendered HTML once the
+                        # page has loaded enough, so extract them in one cheap pass.
+                        try:
+                            discovered += _fast_roster_items_from_html(page.content(),depot_url)
+                        except Exception as html_error:
+                            print(f"    Fast rendered HTML read failed: {html_error}",flush=True)
+                    missing=[f"{role} {period}" for role in roles for period in periods if not pick_pdf(discovered,role,period)]
+                    if missing:
+                        raise RuntimeError("Roster targets unavailable after fast discovery: "+", ".join(missing))
+                    print("    Fast roster discovery found all 6 PDFs.",flush=True)
                 except Exception as e:
                     try: page.evaluate("window.stop()")
                     except Exception: pass
