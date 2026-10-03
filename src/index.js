@@ -11,8 +11,7 @@ const json = (body, status = 200) =>
 
 function authorized(request, env) {
   const auth = request.headers.get("authorization") || "";
-  return Boolean(env.SPR_COMMAND_KEY) &&
-    auth === "Bearer " + env.SPR_COMMAND_KEY;
+  return Boolean(env.SPR_COMMAND_KEY) && auth === "Bearer " + env.SPR_COMMAND_KEY;
 }
 
 async function status(env) {
@@ -38,14 +37,25 @@ async function status(env) {
   } catch {
     message = "Updater status check failed";
   }
+  let pending = null;
+  try {
+    const raw = await env.SPR_COMMANDS.get("pending");
+    pending = raw ? JSON.parse(raw) : null;
+  } catch {}
   return {
-    ok: online, worker_online: online,
-    last_seen: upstream?.last_seen || 0, checked_at: checked,
+    ok: online,
+    worker_online: online,
+    last_seen: upstream?.last_seen || 0,
+    checked_at: checked,
     state: online ? (upstream?.state || "idle") : "offline",
-    message, last_update: upstream?.last_update || 0,
+    message,
+    last_update: upstream?.last_update || 0,
     last_ok: upstream?.last_ok ?? null,
     last_message: upstream?.last_message || "",
-    build: upstream?.build || 613,\n    command_pending: Boolean(await env.SPR_COMMANDS?.get("pending")),
+    build: upstream?.build || 613,
+    command_pending: Boolean(pending),
+    command_type: pending?.command || "",
+    command_state: pending ? (pending.claimed_at ? "running" : "queued") : "",
   };
 }
 
@@ -65,7 +75,36 @@ async function queueCommand(request, env) {
 async function pollCommand(request, env) {
   if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
   const raw = await env.SPR_COMMANDS.get("pending");
-  return json({ok:true, command: raw ? JSON.parse(raw) : null});
+  if (!raw) return json({ok:true, command:null});
+  const item = JSON.parse(raw);
+  if (!item.claimed_at) {
+    item.claimed_at = Math.floor(Date.now()/1000);
+    await env.SPR_COMMANDS.put("pending", JSON.stringify(item), { expirationTtl: 3600 });
+  }
+  return json({ok:true, command:item});
+}
+
+async function commandResult(request, env) {
+  if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
+  const url = new URL(request.url);
+  const id = String(url.searchParams.get("id") || "");
+  if (!id) return json({ok:false,error:"missing_id"},400);
+  const pendingRaw = await env.SPR_COMMANDS.get("pending");
+  if (pendingRaw) {
+    const pending = JSON.parse(pendingRaw);
+    if (pending.id === id) {
+      return json({
+        ok:true,
+        state: pending.claimed_at ? "running" : "queued",
+        command: pending.command,
+        created_at: pending.created_at || 0,
+        claimed_at: pending.claimed_at || 0,
+      });
+    }
+  }
+  const resultRaw = await env.SPR_COMMANDS.get("result:" + id);
+  if (resultRaw) return json({ok:true,state:"done",result:JSON.parse(resultRaw)});
+  return json({ok:true,state:"unknown"});
 }
 
 async function ackCommand(request, env) {
@@ -79,8 +118,10 @@ async function ackCommand(request, env) {
   }
   if (body?.id) {
     await env.SPR_COMMANDS.put("result:" + body.id, JSON.stringify({
-      id: body.id, ok: Boolean(body.ok), message: String(body.message || ""),
-      completed_at: Math.floor(Date.now()/1000)
+      id: body.id,
+      ok: Boolean(body.ok),
+      message: String(body.message || ""),
+      completed_at: Math.floor(Date.now()/1000),
     }), { expirationTtl: 86400 });
   }
   return json({ok:true});
@@ -94,6 +135,7 @@ export default {
       return json(await status(env));
     if (request.method === "POST" && url.pathname === "/command") return queueCommand(request, env);
     if (request.method === "GET" && url.pathname === "/worker/poll") return pollCommand(request, env);
+    if (request.method === "GET" && url.pathname === "/worker/result") return commandResult(request, env);
     if (request.method === "POST" && url.pathname === "/worker/ack") return ackCommand(request, env);
     return new Response("Not found", { status: 404 });
   },
