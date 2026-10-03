@@ -96,6 +96,26 @@ async function queueCommand(request, env) {
   return json({ok:true, queued:true, id:item.id, command});
 }
 
+async function cancelCommand(request, env) {
+  if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
+  const raw = await env.SPR_COMMANDS.get("pending");
+  if (!raw) return json({ok:true,cancelled:false});
+  const pending = JSON.parse(raw);
+  pending.cancelled_at = Math.floor(Date.now()/1000);
+  await env.SPR_COMMANDS.put("pending", JSON.stringify(pending), { expirationTtl: 300 });
+  return json({ok:true,cancelled:true,id:pending.id});
+}
+
+async function cancelStatus(request, env) {
+  if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
+  const url=new URL(request.url);
+  const id=String(url.searchParams.get("id")||"");
+  const raw=await env.SPR_COMMANDS.get("pending");
+  if (!raw) return json({ok:true,cancelled:false});
+  const pending=JSON.parse(raw);
+  return json({ok:true,cancelled:Boolean(pending.cancelled_at && (!id || pending.id===id))});
+}
+
 async function pollCommand(request, env) {
   if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
   const raw = await env.SPR_COMMANDS.get("pending");
@@ -214,6 +234,8 @@ export default {
     if (request.method === "GET" && ["/","/status","/updater-status.json"].includes(url.pathname))
       return json(await status(env));
     if (request.method === "POST" && url.pathname === "/command") return queueCommand(request, env);
+    if (request.method === "POST" && url.pathname === "/cancel") return cancelCommand(request, env);
+    if (request.method === "GET" && url.pathname === "/worker/cancel") return cancelStatus(request, env);
     if (request.method === "GET" && url.pathname === "/worker/poll") return pollCommand(request, env);
     if (request.method === "GET" && url.pathname === "/worker/result") return commandResult(request, env);
     if (request.method === "POST" && url.pathname === "/worker/heartbeat") return heartbeatWorker(request, env);
