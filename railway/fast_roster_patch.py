@@ -65,7 +65,7 @@ def _download_roster_pdf_fast(page, pdf_url, pdf_name):
     last=None
     for attempt in range(2):
         try:
-            resp=page.context.request.get(pdf_url,timeout=15000,fail_on_status_code=False)
+            resp=page.context.request.get(pdf_url,timeout=10000,fail_on_status_code=False)
             body=resp.body()
             if resp.ok and body[:4]==b"%PDF":
                 return body
@@ -164,7 +164,7 @@ old2="""                            pdf=download_with_browser(page,{'href':pdf_u
                                 page.wait_for_timeout(700)
 """
 new2="""                            data=_download_roster_pdf_fast(page,pdf_url,pdf_name)
-                            upload_cached_roster_pdf(pdf_url,pdf_name,data,cache_path)
+                            _store_roster_fast(pdf_url,pdf_name,data,cache_path)
                             pdf_count+=1
                             print(f"    [STORED] {cache_path}", flush=True)
 """
