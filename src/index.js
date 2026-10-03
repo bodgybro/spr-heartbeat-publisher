@@ -64,6 +64,12 @@ async function status(env) {
     pending = raw ? JSON.parse(raw) : null;
   } catch {}
 
+  let lastSprUpdated = 0, lastRostersUpdated = 0;
+  try {
+    lastSprUpdated = Number(await env.SPR_COMMANDS.get("last_success:spr") || 0);
+    lastRostersUpdated = Number(await env.SPR_COMMANDS.get("last_success:rosters") || 0);
+  } catch {}
+
   return {
     ok: online,
     worker_online: online,
@@ -72,6 +78,8 @@ async function status(env) {
     state: online ? (upstream?.state || "idle") : "offline",
     message,
     last_update: upstream?.last_update || 0,
+    sprs_last_updated: lastSprUpdated,
+    rosters_last_updated: lastRostersUpdated,
     last_ok: upstream?.last_ok ?? null,
     last_message: upstream?.last_message || "",
     build: upstream?.build || 613,
@@ -212,16 +220,24 @@ async function ackCommand(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ok:false,error:"invalid_json"},400); }
   const raw = await env.SPR_COMMANDS.get("pending");
+  let completedCommand = "";
   if (raw) {
     const pending = JSON.parse(raw);
-    if (!body?.id || body.id === pending.id) await env.SPR_COMMANDS.delete("pending");
+    if (!body?.id || body.id === pending.id) {
+      completedCommand = String(pending.command || "");
+      await env.SPR_COMMANDS.delete("pending");
+    }
+  }
+  const completedAt = Math.floor(Date.now()/1000);
+  if (Boolean(body?.ok) && ["spr","rosters"].includes(completedCommand)) {
+    await env.SPR_COMMANDS.put("last_success:" + completedCommand, String(completedAt));
   }
   if (body?.id) {
     await env.SPR_COMMANDS.put("result:" + body.id, JSON.stringify({
       id: body.id,
       ok: Boolean(body.ok),
       message: String(body.message || ""),
-      completed_at: Math.floor(Date.now()/1000),
+      completed_at: completedAt,
     }), { expirationTtl: 86400 });
   }
   return json({ok:true});
