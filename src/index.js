@@ -55,7 +55,7 @@ async function status(env) {
     build: upstream?.build || 613,
     command_pending: Boolean(pending),
     command_type: pending?.command || "",
-    command_state: pending ? (pending.claimed_at ? "running" : "queued") : "",
+    command_state: pending ? ((pending.claimed_at || upstream?.state === "updating") ? "running" : "queued") : "",
   };
 }
 
@@ -93,9 +93,22 @@ async function commandResult(request, env) {
   if (pendingRaw) {
     const pending = JSON.parse(pendingRaw);
     if (pending.id === id) {
+      let running = Boolean(pending.claimed_at);
+      if (!running) {
+        try {
+          const heartbeat = await fetch(env.UPDATER_STATUS_URL, {
+            headers: { "cache-control": "no-cache" },
+            cf: { cacheTtl: 0, cacheEverything: false },
+          });
+          if (heartbeat.ok) {
+            const upstream = await heartbeat.json();
+            running = upstream?.state === "updating";
+          }
+        } catch {}
+      }
       return json({
         ok:true,
-        state: pending.claimed_at ? "running" : "queued",
+        state: running ? "running" : "queued",
         command: pending.command,
         created_at: pending.created_at || 0,
         claimed_at: pending.claimed_at || 0,
