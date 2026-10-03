@@ -16,36 +16,58 @@ function authorized(request, env) {
 
 async function status(env) {
   const checked = Math.floor(Date.now() / 1000);
-  let online = false;
   let upstream = null;
+  let source = "none";
   let message = "Online updater unavailable";
+
+  // Prefer the Railway heartbeat written directly to Cloudflare. This avoids
+  // making updater availability depend on cPanel's HTTPS/API port.
   try {
-    const response = await fetch(env.UPDATER_STATUS_URL, {
-      headers: { "cache-control": "no-cache" },
-      cf: { cacheTtl: 0, cacheEverything: false },
-    });
-    if (response.ok) {
-      upstream = await response.json();
-      const lastSeen = Number(upstream.last_seen || 0);
-      online = Boolean(upstream.worker_online) && lastSeen > 0 &&
-        (checked - lastSeen) <= Number(env.MAX_AGE_SECONDS || 7200);
-      message = online ? (upstream.message || "Online updater ready") :
-        "Online updater heartbeat is stale";
-    } else {
-      message = "Updater status returned HTTP " + response.status;
+    const raw = await env.SPR_COMMANDS.get("heartbeat");
+    if (raw) {
+      const hb = JSON.parse(raw);
+      const seen = Number(hb.last_seen || 0);
+      if (seen > 0 && (checked - seen) <= Number(env.MAX_AGE_SECONDS || 7200)) {
+        upstream = hb;
+        source = "cloudflare";
+      }
     }
-  } catch {
-    message = "Updater status check failed";
+  } catch {}
+
+  // Backward-compatible fallback while an older updater is still running.
+  if (!upstream) {
+    try {
+      const response = await fetch(env.UPDATER_STATUS_URL, {
+        headers: { "cache-control": "no-cache" },
+        cf: { cacheTtl: 0, cacheEverything: false },
+      });
+      if (response.ok) {
+        upstream = await response.json();
+        source = "cpanel-fallback";
+      } else {
+        message = "Updater status returned HTTP " + response.status;
+      }
+    } catch {
+      message = "Updater status check failed";
+    }
   }
+
+  const lastSeen = Number(upstream?.last_seen || 0);
+  const online = Boolean(upstream?.worker_online) && lastSeen > 0 &&
+    (checked - lastSeen) <= Number(env.MAX_AGE_SECONDS || 7200);
+  if (online) message = upstream?.message || "Online updater ready";
+  else if (upstream) message = "Online updater heartbeat is stale";
+
   let pending = null;
   try {
     const raw = await env.SPR_COMMANDS.get("pending");
     pending = raw ? JSON.parse(raw) : null;
   } catch {}
+
   return {
     ok: online,
     worker_online: online,
-    last_seen: upstream?.last_seen || 0,
+    last_seen: lastSeen,
     checked_at: checked,
     state: online ? (upstream?.state || "idle") : "offline",
     message,
@@ -53,10 +75,11 @@ async function status(env) {
     last_ok: upstream?.last_ok ?? null,
     last_message: upstream?.last_message || "",
     build: upstream?.build || 613,
+    status_source: source,
     command_pending: Boolean(pending),
     command_type: pending?.command || "",
     command_state: pending ? ((pending.claimed_at || upstream?.state === "updating") ? "running" : "queued") : "",
-    command_progress: pending?.progress || "",
+    command_progress: pending?.progress || upstream?.progress || "",
   };
 }
 
@@ -123,6 +146,29 @@ async function commandResult(request, env) {
   return json({ok:true,state:"unknown"});
 }
 
+async function heartbeatWorker(request, env) {
+  if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
+  let body;
+  try { body = await request.json(); } catch { return json({ok:false,error:"invalid_json"},400); }
+  const now = Math.floor(Date.now()/1000);
+  const payload = {
+    ok: true,
+    source: "railway-cloudflare",
+    build: Number(body?.build || 619),
+    worker_online: true,
+    state: String(body?.state || "idle").slice(0,40),
+    message: String(body?.message || "Online updater ready").slice(0,800),
+    progress: String(body?.progress || "").slice(0,500),
+    last_seen: now,
+    started_at: Number(body?.started_at || 0),
+    last_update: Number(body?.last_update || 0),
+    last_ok: body?.last_ok ?? null,
+    last_message: String(body?.last_message || "").slice(0,1400),
+  };
+  await env.SPR_COMMANDS.put("heartbeat", JSON.stringify(payload), { expirationTtl: 10800 });
+  return json({ok:true,last_seen:now});
+}
+
 async function progressCommand(request, env) {
   if (!authorized(request, env)) return json({ok:false,error:"unauthorized"},401);
   let body;
@@ -170,6 +216,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/command") return queueCommand(request, env);
     if (request.method === "GET" && url.pathname === "/worker/poll") return pollCommand(request, env);
     if (request.method === "GET" && url.pathname === "/worker/result") return commandResult(request, env);
+    if (request.method === "POST" && url.pathname === "/worker/heartbeat") return heartbeatWorker(request, env);
     if (request.method === "POST" && url.pathname === "/worker/progress") return progressCommand(request, env);
     if (request.method === "POST" && url.pathname === "/worker/ack") return ackCommand(request, env);
     return new Response("Not found", { status: 404 });
