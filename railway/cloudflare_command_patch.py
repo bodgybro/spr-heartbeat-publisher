@@ -61,6 +61,35 @@ s=s.replace('                print(f"Checking {role}: today and all future dated
 s=s.replace('                        print(f"  [DOWNLOAD] {role}: {exact_name}",flush=True)',
             '                        _set_online_progress(f"SPR update: {role} — {exact_name}")\n                        print(f"  [DOWNLOAD] {role}: {exact_name}",flush=True)', 1)
 
+
+# Fast roster discovery: modern TCREW depot pages embed the six roster PDF
+# targets in web-part data. Use that cheap single-pass harvest first. Only run
+# the expensive virtualised-DOM scrolling fallback when one or more targets
+# cannot be resolved from the embedded data.
+old_discovery='''                    discovered=_sharepoint_rendered_items(page,depot_url)+_sharepoint_embedded_roster_items(page,depot_url)
+'''
+new_discovery='''                    # Fast path: modern TCREW depot pages already embed all six roster
+                    # PDF targets in their SharePoint web-part data. Harvest that once and
+                    # avoid the expensive virtualised-DOM scroll when all six are present.
+                    discovered=_sharepoint_embedded_roster_items(page,depot_url)
+                    missing=[f"{role} {period}" for role in roles for period in periods if not pick_pdf(discovered,role,period)]
+                    if missing:
+                        print(f"    Fast roster discovery missing {len(missing)} target(s); using rendered fallback: {', '.join(missing)}", flush=True)
+                        _set_online_progress(f"Roster update: {depot_name} ({depot_index}/{len(depots)}) — fallback discovery")
+                        discovered += _sharepoint_rendered_items(page,depot_url)
+                    else:
+                        print("    Fast roster discovery found all 6 PDFs; rendered fallback skipped.", flush=True)
+'''
+if old_discovery not in s:
+    raise SystemExit("roster discovery line not found")
+s=s.replace(old_discovery,new_discovery,1)
+
+# The rendered fallback is now exceptional. Cap its expensive scrolling passes
+# so one malformed depot cannot stall the entire update for many minutes.
+s=s.replace('''    for _ in range(40):
+''','''    for _ in range(8):
+''',1)
+
 def replace_top_level_func(text,name,replacement):
     marker=f"def {name}("
     start=text.find(marker)
