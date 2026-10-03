@@ -26,6 +26,41 @@ if old not in s:
     raise SystemExit("run_update roster tail not found")
 s=s.replace(old,new,1)
 
+# Live progress helper. It updates the local job snapshot and, for manual
+# commands, sends the current step to the Cloudflare command record.
+ACTIVE_HELPER='''ACTIVE_ONLINE_COMMAND_ID = ""
+
+def _set_online_progress(message):
+    message=str(message or "")[:500]
+    with JOB_LOCK:
+        JOB["progress"]=message
+    command_id=str(globals().get("ACTIVE_ONLINE_COMMAND_ID") or "")
+    key=str(os.environ.get("SPR_COMMAND_KEY") or "")
+    if not command_id or not key or not message:
+        return
+    try:
+        requests.post(
+            _online_control_endpoint()+"/worker/progress",
+            headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"SPR-Online-Updater/619"},
+            json={"id":command_id,"progress":message},
+            timeout=(5,15),
+        ).raise_for_status()
+    except Exception as e:
+        print("Online updater progress report failed:",e,flush=True)
+'''
+s=s.replace("\ndef start_background_update(", "\n"+ACTIVE_HELPER+"\ndef start_background_update(", 1)
+
+# Add useful progress checkpoints without changing the update logic.
+s=s.replace("            for depot in depots:", "            for depot_index, depot in enumerate(depots, 1):", 1)
+s=s.replace('                print(f"  Depot: {depot_name}", flush=True)',
+            '                print(f"  Depot: {depot_name}", flush=True)\n                _set_online_progress(f"Roster update: {depot_name} ({depot_index}/{len(depots)} depots)")', 1)
+s=s.replace('                            print(f"    [DOWNLOAD] {role} {period}: {pdf_name}", flush=True)',
+            '                            _set_online_progress(f"Roster update: {depot_name} ({depot_index}/{len(depots)}) — {role} {period}")\n                            print(f"    [DOWNLOAD] {role} {period}: {pdf_name}", flush=True)', 1)
+s=s.replace('                print(f"Checking {role}: today and all future dated folders...")',
+            '                print(f"Checking {role}: today and all future dated folders...")\n                _set_online_progress(f"SPR update: checking {role}")', 1)
+s=s.replace('                        print(f"  [DOWNLOAD] {role}: {exact_name}",flush=True)',
+            '                        _set_online_progress(f"SPR update: {role} — {exact_name}")\n                        print(f"  [DOWNLOAD] {role}: {exact_name}",flush=True)', 1)
+
 def replace_top_level_func(text,name,replacement):
     marker=f"def {name}("
     start=text.find(marker)
@@ -41,7 +76,7 @@ s=replace_top_level_func(s,"start_background_update",'''def start_background_upd
     with JOB_LOCK:
         if JOB["running"]:
             return False
-        JOB.update({"running":True,"done":False,"error":None,"results":[],"mode":mode})
+        JOB.update({"running":True,"done":False,"error":None,"results":[],"mode":mode,"progress":""})
     def worker():
         try:
             if mode == "spr":
@@ -61,6 +96,14 @@ s=replace_top_level_func(s,"start_background_update",'''def start_background_upd
 s=replace_top_level_func(s,"_online_control_endpoint",'''def _online_control_endpoint():
     return str(os.environ.get("SPR_COMMAND_URL") or "https://spr-heartbeat-publisher.daryl-8fd.workers.dev").rstrip("/")''')
 
+s=replace_top_level_func(s,"_job_message",'''def _job_message(snapshot=None):
+    j=snapshot or _job_snapshot()
+    if j.get("running"):
+        return str(j.get("progress") or "SPR/roster update in progress")[:800]
+    if j.get("error"):
+        return str(j.get("error"))[:800]
+    return "Online updater ready"''')
+
 s=replace_top_level_func(s,"_report_online_result",'''def _report_online_result(trigger_id=""):
     if not trigger_id:
         return
@@ -75,12 +118,13 @@ s=replace_top_level_func(s,"_report_online_result",'''def _report_online_result(
     else:
         msg=" | ".join(f"{x.get('role','')}: {x.get('message','')}" for x in (j.get("results") or []))[:4000]
     try:
-        requests.post(endpoint+"/worker/ack",headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"SPR-Online-Updater/615"},json={"id":trigger_id,"ok":ok,"message":msg},timeout=(5,30)).raise_for_status()
+        requests.post(endpoint+"/worker/ack",headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"SPR-Online-Updater/619"},json={"id":trigger_id,"ok":ok,"message":msg},timeout=(5,30)).raise_for_status()
     except Exception as e:
         print("Online updater result report failed:",e,flush=True)''')
 
 s=replace_top_level_func(s,"online_control_worker",'''def online_control_worker():
     """Poll the Cloudflare command queue and run authenticated manual updates."""
+    global ACTIVE_ONLINE_COMMAND_ID
     endpoint=_online_control_endpoint()
     key=str(os.environ.get("SPR_COMMAND_KEY") or "")
     if not key:
@@ -98,13 +142,18 @@ s=replace_top_level_func(s,"online_control_worker",'''def online_control_worker(
                 tid=str(cmd.get("id") or "")
                 kind=str(cmd.get("command") or "").lower()
                 if tid and kind in ("spr","rosters"):
+                    ACTIVE_ONLINE_COMMAND_ID=tid
                     if start_background_update(scheduler_site_url(), mode=kind):
                         active_trigger=tid
+                        _set_online_progress(("Roster" if kind=="rosters" else "SPR")+" update starting…")
                         print(f"Manual online {kind} update requested from Admin.",flush=True)
+                    else:
+                        ACTIVE_ONLINE_COMMAND_ID=""
             snap=_job_snapshot()
             if active_trigger and snap.get("done") and not snap.get("running"):
                 _report_online_result(active_trigger)
                 active_trigger=""
+                ACTIVE_ONLINE_COMMAND_ID=""
         except Exception as e:
             print("Online updater control connection error:",e,flush=True)
         time.sleep(5)''')
