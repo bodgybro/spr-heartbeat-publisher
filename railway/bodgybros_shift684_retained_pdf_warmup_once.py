@@ -214,7 +214,13 @@ def patch(source):
     url='state.sourceUrl=cached.sourceUrl||\'\';'
     if restore.count(url)!=1:raise RuntimeError('Restore PDF URL anchor differs')
     restore=restore.replace(url,
-      "state.sourceUrl=String(cached.sourceUrl||'').startsWith('blob:')?'':(cached.sourceUrl||'');",1)
+      """state.sourceUrl=String(cached.sourceUrl||'').startsWith('blob:')?'':(cached.sourceUrl||'');
+    if(!state.sourceUrl&&/^20\\d{2}-\\d\\d-\\d\\d$/.test(state.loadedDate)){
+      const [year,month,day]=state.loadedDate.split('-');
+      const driver=state.role==='driver';
+      state.sourceUrl='./spr/'+(driver?'d':'g')+'/All%20'+(driver?'Drivers':'Guards')+
+        '%20Combined%20'+day+'_'+month+'_'+year+'.pdf';
+    }""",1)
     source=source[:restore_at]+restore+source[restore_end:]
 
     # Remove stale "ready" label until the PDF parser has actually completed.
