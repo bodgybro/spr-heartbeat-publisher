@@ -255,7 +255,10 @@ def _spr686_direct_guard26():
         p=unquote(str(p or ''))
         if p in seen or not p.lower().endswith('.pdf'):return
         if not p.lower().startswith(guard_root.lower()+'/'):return
-        if not sharepoint_combined_pdf_matches(posixpath.basename(p),p,'All Guards Combined',target):return
+        # Date-folder membership and actual printed Guards pages are the
+        # identity checks; accept alternate filenames in the correct folder.
+        basename=posixpath.basename(p)
+        if date_from_name(basename) and date_from_name(basename)!=target:return
         if not any(p.lower().startswith(f.lower()+'/') for f in dayfolders):return
         seen.add(p);pdfpaths.append(p)
     with SHAREPOINT_BROWSE_LOCK, sync_playwright() as pw:
@@ -293,6 +296,8 @@ def _spr686_direct_guard26():
                     try:
                         files=rest_items(api,folder,'Files')
                         print('  [GUARD26 SHAREPOINT FILES] '+str(len(files)),flush=True)
+                        if files:
+                            print('  [GUARD26 FILE NAMES] '+repr([str(item.get('Name') or '')[:90] for item in files[:35]]),flush=True)
                         for item in files:add_pdf(item.get('ServerRelativeUrl'))
                     except Exception as exc:
                         print('  [GUARD26 SHAREPOINT FILES ERROR] '+str(exc).splitlines()[0][:110],flush=True)
