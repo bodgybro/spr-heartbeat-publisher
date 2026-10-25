@@ -73,7 +73,7 @@ def patch(js):
 '''
     handler=handler.replace(original,new,1)
     js=js[:start]+handler+js[end:]
-    js=MARKER+'\n'+js.replace(anchor,HELPER+'\n'+anchor,1).replace(old,new,1)
+    js=MARKER+'\n'+js.replace(anchor,HELPER+'\n'+anchor,1)
     if js.count('const prepared=await getPreparedShiftPdf(shift);')!=1:
         raise RuntimeError('Prepared shift URL call unexpectedly duplicated')
     return js,True
