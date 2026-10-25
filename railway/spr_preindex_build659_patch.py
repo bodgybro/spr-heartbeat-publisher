@@ -70,11 +70,20 @@ def _spr_publish_index(job,page,cfg):
         if secondary_current:
             print(f'  [INDEXES CURRENT] {date} {role}: primary and secondary',flush=True)
             return
-    page.goto(targets[0].rstrip('/')+'/',wait_until='domcontentloaded',timeout=60000)
-    try:
-        page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === "function"',timeout=25000)
-    except Exception:
-        raise RuntimeError('Website must be updated to SPR Search Build 659 for pre-indexing')
+    # Build against either website's local PDF; primary outage must not stop
+    # the independent secondary from receiving its prepared index.
+    index_source=None
+    source_errors=[]
+    for base in (targets[0],'https://www.kustomvinyls.com/sps','https://kustomvinyls.com/sps'):
+        try:
+            page.goto(base.rstrip('/')+'/',wait_until='domcontentloaded',timeout=35000)
+            page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === "function"',timeout=15000)
+            index_source=base
+            break
+        except Exception as exc:source_errors.append(f'{base}: {str(exc)[:140]}')
+    if index_source is None:
+        raise RuntimeError('Neither website can build the prepared SPR index: '+' | '.join(source_errors))
+    print(f'  [INDEX SOURCE] {date} {role}: {index_source}',flush=True)
     page.set_default_timeout(1500000)
     print(f'  [INDEX START] {date} {role}',flush=True)
     result=page.evaluate('o => window.__SPR_INDEXER_API.build(o.date,o.role)',{'date':date,'role':role})
@@ -99,7 +108,7 @@ def _spr_publish_index(job,page,cfg):
                 raise RuntimeError(f'HTTP {response.status_code}: {response.text[:200]}')
             print(f'  [INDEX PUBLISHED] {date} {role} {target}',flush=True)
         except Exception as exc:failures.append(f'{target}: {exc}')
-    if failures:raise RuntimeError(' | '.join(failures))
+    if failures:print('  [PRIMARY INDEX FAILED] '+' | '.join(failures),flush=True)
     # Publish the exact same pre-built index to the secondary mirror.
     # Independent retries protect Bodgybros performance and completion reporting.
     secondary_bases=('https://www.kustomvinyls.com/sps','https://kustomvinyls.com/sps')
@@ -122,6 +131,7 @@ def _spr_publish_index(job,page,cfg):
                 if (info.get('sourceSha')==sha and info.get('parserBuild')==658
                     and info.get('pageLayoutBuild')==595):
                     print(f'  [SECONDARY INDEX CURRENT] {date} {role} {base}',flush=True)
+                    if failures:raise RuntimeError(' | '.join(failures))
                     return
                 posted=requests.post(endpoint,
                     params={'action':'publish','date':date,'role':role},
@@ -132,6 +142,7 @@ def _spr_publish_index(job,page,cfg):
                 if posted.status_code!=200 or result.get('ok') is not True:
                     raise RuntimeError(f'index publish HTTP {posted.status_code}: {posted.text[:160]}')
                 print(f'  [SECONDARY INDEX PUBLISHED] {date} {role} {base}',flush=True)
+                if failures:raise RuntimeError(' | '.join(failures))
                 return
             except Exception as exc:
                 secondary_error=f'{base}: {str(exc)[:180]}'
@@ -139,6 +150,8 @@ def _spr_publish_index(job,page,cfg):
             print(f'  [SECONDARY INDEX RETRY] {date} {role} attempt {attempt}: {secondary_error}',flush=True)
             time.sleep(15)
     print(f'  [SECONDARY INDEX FAILED] {date} {role}: {secondary_error}',flush=True)
+    failures.append(str(secondary_error))
+    if failures:raise RuntimeError(' | '.join(failures))
 
 def _spr_index_background(jobs):
     if not _SPR_INDEX_RUNNING.acquire(blocking=False):
