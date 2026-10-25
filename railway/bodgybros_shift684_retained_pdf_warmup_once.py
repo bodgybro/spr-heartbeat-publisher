@@ -197,7 +197,7 @@ def patch(source):
     # without starting source PDF parsing. Fix both restored and selected SPRs
     # at the common successful UI activation point.
     start=source.find('function activateLoadedSprUi(')
-    end=source.find('async function restoreRetainedSpr(){',start)
+    end=source.find('function buildShiftPageIndex(){',start)
     if start<0 or end<start:raise RuntimeError('Cannot find shared SPR UI activation')
     fragment=source[start:end]
     needle="  ui.showSprPanel.classList.remove('hidden');"
