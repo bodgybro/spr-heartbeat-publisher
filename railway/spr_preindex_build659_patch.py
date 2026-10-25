@@ -38,7 +38,8 @@ def _spr_publish_index(job,page,cfg):
     raw=os.environ.get('SPR_UPLOAD_TARGETS') or str(site or cfg.get('relay_site_url') or 'https://www.bodgybros.com/sps')
     for part in raw.split(','):
         target=canonical_spr_site(part.strip())
-        if target and target not in targets: targets.append(target)
+        # The secondary PDF mirror is handled separately to keep the primary index reliable.
+        if target and 'kustomvinyls.com' not in target.lower() and target not in targets: targets.append(target)
     if not targets:targets=['https://www.bodgybros.com/sps']
     pending=[]
     for target in targets:
@@ -82,7 +83,46 @@ def _spr_publish_index(job,page,cfg):
                 raise RuntimeError(f'HTTP {response.status_code}: {response.text[:200]}')
             print(f'  [INDEX PUBLISHED] {date} {role} {target}',flush=True)
         except Exception as exc:failures.append(f'{target}: {exc}')
-    if failures:raise RuntimeError(' | '.join(failures))
+if failures:raise RuntimeError(' | '.join(failures))
+    # Publish the exact same pre-built index to the secondary mirror.
+    # Independent retries protect Bodgybros performance and completion reporting.
+    secondary_bases=('https://www.kustomvinyls.com/sps','https://kustomvinyls.com/sps')
+    secondary_error=None
+    for attempt in range(1,7):
+        for base in secondary_bases:
+            endpoint=base+'/spr-index-api.php'
+            try:
+                meta=requests.get(endpoint,
+                    params={'action':'meta','date':date,'role':role},
+                    timeout=(8,20),allow_redirects=False)
+                if meta.status_code in (301,302,303,307,308):
+                    raise RuntimeError('redirected index endpoint')
+                if meta.status_code==404:
+                    raise RuntimeError('spr-index-api.php not installed on secondary site (HTTP 404)')
+                if not meta.ok:
+                    raise RuntimeError('index meta HTTP '+str(meta.status_code))
+                try:info=meta.json()
+                except ValueError as exc:raise RuntimeError('index meta is not JSON') from exc
+                if (info.get('sourceSha')==sha and info.get('parserBuild')==658
+                    and info.get('pageLayoutBuild')==595):
+                    print(f'  [SECONDARY INDEX CURRENT] {date} {role} {base}',flush=True)
+                    return
+                posted=requests.post(endpoint,
+                    params={'action':'publish','date':date,'role':role},
+                    data=compressed,headers=headers,timeout=(10,180),
+                    allow_redirects=False)
+                try:result=posted.json()
+                except ValueError:result={}
+                if posted.status_code!=200 or result.get('ok') is not True:
+                    raise RuntimeError(f'index publish HTTP {posted.status_code}: {posted.text[:160]}')
+                print(f'  [SECONDARY INDEX PUBLISHED] {date} {role} {base}',flush=True)
+                return
+            except Exception as exc:
+                secondary_error=f'{base}: {str(exc)[:180]}'
+        if attempt<6:
+            print(f'  [SECONDARY INDEX RETRY] {date} {role} attempt {attempt}: {secondary_error}',flush=True)
+            time.sleep(15)
+    print(f'  [SECONDARY INDEX FAILED] {date} {role}: {secondary_error}',flush=True)
 
 def _spr_index_background(jobs):
     if not _SPR_INDEX_RUNNING.acquire(blocking=False):
