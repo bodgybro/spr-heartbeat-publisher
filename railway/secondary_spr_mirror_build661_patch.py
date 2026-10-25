@@ -329,41 +329,10 @@ def upload_pdf(site,role,pdf,cfg,page=None):
                     result[label]='cPanel API upload acknowledged (SHA-256 not independently checked)'
                     print(f'  [SPR STORED CPANEL ACKNOWLEDGED] {label} {date} {index_role}',flush=True)
                 continue
-            base,meta=_dual_host(label,'spr-dual-publish-api.php',params)
-            if meta.get('sha256')==sha and meta.get('size')==size:
-                result[label]='unchanged'
-                print(f'  [SPR VERIFIED UNCHANGED] {label} {date} {index_role}',flush=True)
-                continue
             if label=='kustomvinyls':
-                count=max(1,math.ceil(size/(1024*1024)))
-                with Path(pdf).open('rb') as source:
-                    for i in range(count):
-                        chunk=source.read(1024*1024)
-                        for attempt in range(3):
-                            try:
-                                r=requests.post(base+'/spr-dual-publish-api.php',
-                                    params={'action':'upload-chunk','date':date,'role':index_role},
-                                    headers=_cloud_worker_headers(cfg),
-                                    data={'sha256':sha,'index':str(i),'total':str(count)},
-                                    files={'chunk':('chunk.bin',chunk,'application/octet-stream')},
-                                    timeout=(10,90),allow_redirects=False,verify=_dual_tls_verify(label))
-                                try:j=r.json()
-                                except ValueError:j={}
-                                if not r.ok or not j.get('ok'):
-                                    raise RuntimeError(f'HTTP {r.status_code} '+str(j.get('error') or r.text[:120]))
-                                if i==count-1 and (j.get('sha256')!=sha or j.get('size')!=size):
-                                    raise RuntimeError('SPR final size or checksum mismatch')
-                                break
-                            except Exception:
-                                if attempt==2:raise
-                                time.sleep(attempt+2)
-            # Verify the secondary PDF is now stored locally, not proxied.
-            if label in _DUAL_HOSTS:
-                r=requests.get(base+'/spr-dual-publish-api.php',
-                    params=params,timeout=(6,25),allow_redirects=False,verify=_dual_tls_verify(label))
-                j=r.json() if r.status_code==200 else {}
-                if j.get('sha256')!=sha or j.get('size')!=size:
-                    raise RuntimeError('Post-upload local SPR verification failed')
+                result[label]=_kustom_sftp_pdf(pdf,role,sha)
+                continue
+            raise RuntimeError('Unknown secondary SPR destination: '+label)
             result[label]='uploaded'
             print(f'  [SPR STORED] {label} {date} {index_role}: {size} bytes',flush=True)
         except Exception as e:
@@ -380,6 +349,11 @@ def upload_cached_roster_pdf(url,name,data,cache_path=''):
     success=0
     for label in _DUAL_HOSTS:
         try:
+            if label=='kustomvinyls':
+                _kustom_sftp_roster(url,cache_path,data,sha)
+                _DUAL_ROSTER_OK[label].add(url)
+                success+=1
+                continue
             base,_=_dual_host(label,'roster-cache-api.php',{'action':'health'})
             endpoint=base+'/roster-cache-api.php'
             headers=_cache_headers()
@@ -437,6 +411,9 @@ def publish_roster_manifest(root_url,entries):
             errors.append(f'{label}: {len(missing)} missing PDFs, {len(_DUAL_ROSTER_ERRORS[label])} errors')
             continue
         try:
+            if label=='kustomvinyls':
+                done[label]=_kustom_sftp_manifest(root_url,entries)
+                continue
             base,_=_dual_host(label,'roster-cache-api.php',{'action':'health'})
             endpoint=base+'/roster-cache-api.php'
             r=requests.post(endpoint,params={'action':'worker-manifest'},
@@ -460,6 +437,7 @@ def sync_all_rosters_online():
     for key in _DUAL_HOSTS:
         _DUAL_ROSTER_OK[key].clear()
         _DUAL_ROSTER_ERRORS[key].clear()
+    _KUSTOM_ROSTER_PROOFS.clear()
     return _DUAL_ORIG_ROSTER_SYNC()
 
 # The cross-site HTTP pull is obsolete. Kustom receives its own direct bytes.
@@ -467,7 +445,7 @@ def _spr_mirror_secondary_worker(jobs):
     print('  [CROSS-SITE PULL DISABLED] Both domains use independently uploaded SPR files',flush=True)
 
 print('  [DUAL INDEPENDENT STORES READY] SPR and roster uploads target both websites',flush=True)
-print('  [KUSTOM TLS EXCEPTION] Certificate verification disabled only for Kustom Vinyls HTTPS requests',flush=True)
+print('  [KUSTOM SFTP CODE READY] Secondary SPRs, rosters and indexes use independent SFTP; requires KUSTOM_SFTP_* settings',flush=True)
 
 '''
 def apply(path):
