@@ -150,21 +150,26 @@ def upload_pdf(site,role,pdf,cfg,page=None):
         try:
             params={'action':'meta','date':date,'role':index_role}
             if label=='bodgybros':
-                try:base,meta=_dual_host(label,'spr-dual-publish-api.php',params)
-                except Exception as e:
-                    base='https://www.bodgybros.com/sps';meta={}
-                    print('  [PRIMARY SPR META UNAVAILABLE] '+str(e)[:150],flush=True)
-            else:base,meta=_dual_host(label,'spr-dual-publish-api.php',params)
+                # Bodgybros has always used SFTP with cPanel as fallback.
+                # Do NOT call PHP/HTTP to decide whether an SFTP transfer succeeded.
+                try:
+                    _spr_upload_over_sftp(role,pdf)
+                    result[label]='SFTP SHA-256 verified'
+                    print(f'  [SPR STORED SFTP VERIFIED] {label} {date} {index_role}: {size} bytes',flush=True)
+                except Exception as sftp_error:
+                    if 'SHA-256 mismatch' in str(sftp_error):
+                        raise
+                    print('  [SPR SFTP UNAVAILABLE] '+str(sftp_error)[:200]+'; trying direct cPanel',flush=True)
+                    _spr_upload_over_cpanel(role,pdf)
+                    result[label]='cPanel API upload acknowledged (SHA-256 not independently checked)'
+                    print(f'  [SPR STORED CPANEL ACKNOWLEDGED] {label} {date} {index_role}',flush=True)
+                continue
+            base,meta=_dual_host(label,'spr-dual-publish-api.php',params)
             if meta.get('sha256')==sha and meta.get('size')==size:
                 result[label]='unchanged'
                 print(f'  [SPR VERIFIED UNCHANGED] {label} {date} {index_role}',flush=True)
                 continue
-            if label=='bodgybros':
-                try:_spr_upload_over_sftp(role,pdf)
-                except Exception as e:
-                    print('  [SPR SFTP FALLBACK] '+str(e)[:120],flush=True)
-                    _spr_upload_over_cpanel(role,pdf)
-            else:
+            if label=='kustomvinyls':
                 count=max(1,math.ceil(size/(1024*1024)))
                 with Path(pdf).open('rb') as source:
                     for i in range(count):
