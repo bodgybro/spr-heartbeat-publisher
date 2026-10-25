@@ -102,7 +102,37 @@ def apply(path):
     if not start_positions:raise RuntimeError('Main boundary not found')
     at=start_positions[-1]
     updated=''.join(lines[:at])+EXTENSION+'\n'+''.join(lines[at:])
+    # Every wrapper must forward include_rosters to a base function that accepts it.
+    # The older Cloudflare patch can change the roster body without changing its
+    # signature when the original definition is formatted differently.
+    parsed=ast.parse(updated)
+    updated_lines=updated.splitlines(keepends=True)
+    base_checked=False
+    repairs=[]
+    for node in parsed.body:
+        if not isinstance(node,ast.FunctionDef) or node.name!='run_update':
+            continue
+        params=node.args
+        named=[a.arg for a in params.posonlyargs+params.args+params.kwonlyargs]
+        accepts='include_rosters' in named or params.kwarg is not None
+        reads_flag=any(isinstance(item,ast.Name) and item.id=='include_rosters' for item in ast.walk(node))
+        print(f'  [RUN_UPDATE CHECK] line {node.lineno}: params={named}; accepts_flag={accepts}; uses_flag={reads_flag}',flush=True)
+        if accepts:
+            if 'include_rosters' in named:base_checked=True
+            continue
+        if not reads_flag:
+            raise RuntimeError('run_update does not accept or use include_rosters; cannot safely disable roster work')
+        line=updated_lines[node.lineno-1]
+        if line.strip()!='def run_update(site):':
+            raise RuntimeError('run_update has an unsupported signature and cannot be repaired safely')
+        updated_lines[node.lineno-1]=line.replace('def run_update(site):','def run_update(site, include_rosters=True):',1)
+        repairs.append(node.lineno)
+        base_checked=True
+    if not base_checked:
+        raise RuntimeError('run_update signature validation failed: no base implementation accepts include_rosters')
+    updated=''.join(updated_lines)
     compile(updated,str(path),'exec')
+    print(f'  [RUN_UPDATE VALIDATED] include_rosters forwarded; base signature repairs={repairs}',flush=True)
     path.write_text(updated,encoding='utf-8')
     print('Secondary SPR mirroring enabled: Kustom Vinyls (authenticated, post-update)',flush=True)
 
