@@ -100,8 +100,14 @@ PREPARE=r'''async function prepareShiftPdfUrl(shift,onProgress=()=>{}){
       // Cached PDF may be stale/damaged even when its search index looks
       // correct. A manual Load previously fixed this; now do that once
       // automatically, without resetting search results or indexes.
-      if(!state.pdfBytes||!originalDate||!state.sourceUrl ||
-         String(state.sourceUrl).startsWith('blob:'))throw error;
+      if(!state.pdfBytes||!originalDate)throw error;
+      // A blob URL from a previous tab is never valid after a device restore.
+      if(!state.sourceUrl||String(state.sourceUrl).startsWith('blob:')){
+        const [year,month,day]=originalDate.split('-');
+        const driver=originalRole==='driver';
+        state.sourceUrl='./spr/'+(driver?'d':'g')+'/All%20'+
+          (driver?'Drivers':'Guards')+'%20Combined%20'+day+'_'+month+'_'+year+'.pdf';
+      }
       console.warn('Shift '+value+' cached source failed, retrying original PDF once:',error);
       sameSelection();
       state.pdfBytes=null;
@@ -177,7 +183,7 @@ def patch(source):
     if '// SPR_BUILD683_RESTORED_650_FAST_SHIFT_CACHE' not in source:
         raise RuntimeError('Expected Build 683 frontend missing')
     # Explicitly preserve the index/search and the existing IndexedDB store.
-    for key in ('SPR_MULTI_STORE','async function restoreRetainedSpr(){',
+    for key in ('SPR_MULTI_STORE',
                 'function activateLoadedSprUi(', 'async function loadOnlinePdf(){',
                 'function scheduleActivePdfPrefetch(){'):
         if key not in source:raise RuntimeError('Expected frontend state hook missing '+key)
@@ -205,23 +211,6 @@ def patch(source):
     scheduleActivePdfPrefetch();
   }''',1)
     source=source[:start]+fragment+source[end:]
-
-    # Fixed restored cache URL: old blob: URLs are invalid after a reload.
-    restore_at=source.find('async function restoreRetainedSpr(){')
-    restore_end=source.find('function buildShiftPageIndex(){',restore_at)
-    if restore_at<0 or restore_end<=restore_at:raise RuntimeError('Restore state function not found')
-    restore=source[restore_at:restore_end]
-    url='state.sourceUrl=cached.sourceUrl||\'\';'
-    if restore.count(url)!=1:raise RuntimeError('Restore PDF URL anchor differs')
-    restore=restore.replace(url,
-      """state.sourceUrl=String(cached.sourceUrl||'').startsWith('blob:')?'':(cached.sourceUrl||'');
-    if(!state.sourceUrl&&/^20\\d{2}-\\d\\d-\\d\\d$/.test(state.loadedDate)){
-      const [year,month,day]=state.loadedDate.split('-');
-      const driver=state.role==='driver';
-      state.sourceUrl='./spr/'+(driver?'d':'g')+'/All%20'+(driver?'Drivers':'Guards')+
-        '%20Combined%20'+day+'_'+month+'_'+year+'.pdf';
-    }""",1)
-    source=source[:restore_at]+restore+source[restore_end:]
 
     # Remove stale "ready" label until the PDF parser has actually completed.
     early='    showShiftPdfReady();\n    scheduleShiftPdfWarmParse();'
