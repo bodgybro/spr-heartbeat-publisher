@@ -86,6 +86,22 @@ def run_update(site, *args, **kwargs):
         if jobs:
             threading.Thread(target=_spr_mirror_secondary_worker,args=(jobs,),
                 name='spr-secondary-mirror',daemon=True).start()
+
+# Bind the same keyword used by manual and scheduled commands against every
+# stage of the *runtime* call chain, without actually running any update.
+def _spr_verify_update_chain():
+    import inspect
+    members=(
+        ('active',run_update),
+        ('mirror base',_SPR_MIRROR_UPDATE_ORIGINAL),
+        ('pre-index base',_SPR_RUN_UPDATE_ORIGINAL),
+    )
+    for label,func in members:
+        try:inspect.signature(func).bind('https://www.bodgybros.com/sps',include_rosters=False)
+        except TypeError as exc:
+            raise RuntimeError(f'SPR updater keyword test failed at {label}: {exc}') from exc
+    print('  [SPR UPDATE ARGUMENT TEST PASSED] manual and scheduled SPR-only calls accept include_rosters=False',flush=True)
+_spr_verify_update_chain()
 '''
 def apply(path):
     src=path.read_text(encoding='utf-8')
