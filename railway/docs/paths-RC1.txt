@@ -1,0 +1,114 @@
+SPR SEARCH RC1 — FAST LOAD + DEPLOYMENT PATHS
+===============================================
+Stable baseline: RC1, renamed from user-tested live Build 687 (26 Oct 2026).
+Primary website: https://www.bodgybros.com/sps/
+Web root: public_html/sps/
+Site backup: public_html/sps/SPR-Search-RC1-Bodgybros.zip
+This file documents the working process. Never store passwords,
+private keys, session cookies or deployment tokens here.
+
+FAST LOAD: PRESERVE THESE BEHAVIOURS
+-----------------------------------
+1. Date + role uniquely identify source and cache:
+   Drivers: spr/d/All Drivers Combined dd_mm_yyyy.pdf
+   Guards:  spr/g/All Guards Combined dd_mm_yyyy.pdf
+   Do not mix Driver and Guard results, cached indexes or original PDFs.
+2. On Load, check the IndexedDB stored index first (per date + role),
+   including filename, parser/layout version, and original source SHA-256.
+   Current RC1 script.js includes SPR_PARSER_BUILD=658 and
+   SPR_PAGE_LAYOUT_BUILD=595; do not change without rebuilding indexes.
+   Local cache retains recent selected dates (SPR_CACHE_MAX_DATES=4).
+3. If local index is absent/stale, fetch the PUBLISHED/prebuilt index from:
+   spr-index-api.php?action=meta&date=YYYY-MM-DD&role=driver|guard
+   spr-index-api.php?action=get&date=YYYY-MM-DD&role=driver|guard
+   The Railway indexer uses the same frontend PDF parser to prepare this.
+   Searching must NOT wait for downloading/parsing the entire original PDF.
+4. Only if neither prepared index works, load/parse the original PDF once,
+   then store its prepared records/pages/shifts in IndexedDB.
+5. For fast SHIFT clicks, the original PDF downloads once in the
+   background, separate from the search index. The shift viewer extracts
+   just the original source pages for the selected shift and reuses
+   cached Blob URLs. Retain the simple Build 650/609 extraction method;
+   do NOT reintroduce Build 680-681 shift-cache complexity.
+6. Build 687 protection: Before using original source bytes or cached
+   shift PDFs, verify original PDF SHA-256 == search index sourceSha.
+   If stale, discard source/shift cache and fetch fresh (no-store), then
+   verify again. If still wrong, REFUSE to open wrong shift pages.
+   This fixed Guard Shift 5009 opening Driver Shift 12.
+7. A role/date change cancels older in-flight loads and invalidates
+   results. Do not allow stale async callbacks or previous-role cache
+   entries to take over the selected SPR.
+8. Important script.js functions: loadOnlinePdf, readRetainedSpr,
+   restoreRetainedSpr, loadPublishedSprIndex, publishedIndexSha,
+   sprSelectionMatches, sprPagesConflictWithRole,
+   scheduleActivePdfPrefetch, ensureActivePdfBytes,
+   sprOriginalPdfMatchesIndex, prepareShiftPdfUrl.
+
+ROLE AND PDF INTEGRITY: 26 OCT 2026 INCIDENT
+--------------------------------------------
+The SharePoint 'All Guards Combined 26_10_2026.pdf' was actually
+a Drivers PDF. A candidate with a Guards name can have Driver headings.
+Always validate printed 'Sydney Trains Guard/Driver' headings, not just
+filename or SharePoint row labels. The full correct 26 Oct Guards
+document was reconstructed from 13 individual Guard depot files,
+1,306 pages. Correct index: 4,346 runs, 628 shifts.
+The PDF and prebuilt index must agree on SHA-256. Never publish a
+single-depot PDF (e.g. a 93-page file) as the full combined document.
+Do not touch earlier Guards dates or Drivers during targeted repair.
+
+LIVE DEPLOY: GITHUB -> RAILWAY -> SFTP
+--------------------------------------
+GitHub repository: bodgybro/spr-heartbeat-publisher
+Patch scripts: railway/*.py, pinned to immutable commit SHA.
+Railway project/service: spr-heartbeat-publisher / spr-online-updater
+Production environment; Bodgybros is the primary publishing target.
+
+1. Create a small, narrowly scoped patch in GitHub's railway/ directory.
+   Keep it compatible with the CURRENT live file version, not an old ZIP.
+   Existing precedents: deploy_spr_search_build686_frontend.py and
+   deploy_spr_search_build687_shift_sha.py.
+2. Pin the raw GitHub script URL to its exact commit SHA.
+3. Append to Railway's service startCommand just before
+   'exec /app/start.sh': download pinned script -> python compile check ->
+   execute script. It uses the ALREADY configured Railway SFTP settings
+   and trusted host-key store; NEVER embed secrets in code, notes or logs.
+4. Update the Railway startCommand and set a new harmless deployment
+   revision variable to trigger a CONFIGURATION deployment. A plain
+   redeploy sometimes reuses the previous startup snapshot.
+5. SFTP installer MUST read current live files, validate expected source,
+   stage only changes, SHA-verify staged bytes, atomically rename,
+   re-read and SHA-verify live destination files; roll back on failure.
+6. Confirm in Railway's NEW deployment logs the per-file
+   '[LIVE VERIFIED]' checks and service 'READY' status. The general
+   Railway 'SUCCESS' state alone is not proof of live file deployment.
+7. REMOVE the one-time script from startup after confirmed upload.
+   Leaving it in place caused later Railway restarts to fail.
+8. Update versioned script.js?v=... reference and displayed build label
+   together, so mobile browsers do not reuse outdated JavaScript.
+9. Deployment ZIP has files directly at root, NO app/ duplicate and
+   NO wrapper directory. Only include application files + this note.
+   Never include live SPR PDFs, indexed data, rosters, .env,
+   credentials, admin-config.php or private backups in a public ZIP.
+
+POST-DEPLOY REGRESSION TESTS
+----------------------------
+- RC1 label shows at /sps/ on mobile and desktop after refresh.
+- Fresh date/role Load and a repeated cached Load are both fast.
+- Drivers -> Guards -> Drivers correctly separates all results.
+- Guards 26/10 run 197A finds Guard data, not Drivers.
+- Guards 26/10 Shift 5009 opens original Guards shift pages, NOT
+  Auburn Yard Drivers Shift 12.
+- Drivers 26/10 'Adams' / Shift 65 opens the correct Driver page.
+- Original shift PDF is fetched once per selection, SHA-verified;
+  repeated shift clicks are fast and reuse the correct source.
+- Updater still runs 10:00, 14:00 and 20:00 Australia/Sydney;
+  SPR and roster sources are not altered by frontend deployments.
+
+RC1 RECOVERY ARCHIVE
+--------------------
+SPR-Search-RC1-Bodgybros.zip is a snapshot of the ACTUAL live
+application files at RC1, with paths.txt and SHA256SUMS.json inside.
+The ZIP is deliberately not a dump of server data or credentials.
+Extract it directly into public_html/sps to restore the frontend.
+Do not delete/overwrite existing SPR PDF, indices, roster, or
+private configuration directories when restoring.
