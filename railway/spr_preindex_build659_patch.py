@@ -31,6 +31,103 @@ def upload_pdf(site,role,pdf,cfg,page=None):
         print('  [INDEX QUEUE FAILED]',e,flush=True)
     return result
 
+def _spr_publish_index_primary_sftp(date,role,source_sha,compressed):
+    """Publish a matching index and sidecar atomically via primary SFTP."""
+    import base64,io,posixpath,hashlib,json
+    import paramiko
+    env=os.environ
+    host=env.get('SFTP_HOST','').strip()
+    user=env.get('SFTP_USERNAME','').strip()
+    rawkey=env.get('SFTP_PRIVATE_KEY_B64','').strip()
+    root=env.get('SFTP_ROOT','').strip()
+    port=int(env.get('SFTP_PORT') or 22)
+    if not all((host,user,rawkey,root)):
+        raise RuntimeError('Primary SFTP config unavailable for index publication')
+    remote_pdf_dir=_spr_remote_subdir(root,'drivers' if role=='driver' else 'guards')
+    index_dir=posixpath.join(posixpath.dirname(remote_pdf_dir),'i','d' if role=='driver' else 'g')
+    pdf_name=('All Drivers Combined ' if role=='driver' else 'All Guards Combined ')+date[8:10]+'_'+date[5:7]+'_'+date[:4]+'.pdf'
+    remote_pdf=posixpath.join(remote_pdf_dir,pdf_name)
+    remote_index=posixpath.join(index_dir,date+'.json.gz')
+    remote_meta=posixpath.join(index_dir,date+'.meta.json')
+    kh=DATA_ROOT/'credentials'/'spr-sftp-known_hosts'
+    kh.parent.mkdir(parents=True,exist_ok=True)
+    if not kh.exists():
+        kh.write_text('',encoding='ascii')
+        os.chmod(kh,0o600)
+    key_text=base64.b64decode(rawkey).decode('utf-8')
+    key=None
+    for key_type in (paramiko.Ed25519Key,paramiko.RSAKey,paramiko.ECDSAKey):
+        try:
+            key=key_type.from_private_key(io.StringIO(key_text))
+            break
+        except Exception:pass
+    if key is None:raise RuntimeError('Invalid primary SFTP key')
+    ssh=paramiko.SSHClient()
+    ssh.load_host_keys(str(kh))
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    tmps=[]
+    try:
+        ssh.connect(hostname=host,port=port,username=user,pkey=key,
+            timeout=7,auth_timeout=8,banner_timeout=8,
+            allow_agent=False,look_for_keys=False)
+        ssh.save_host_keys(str(kh))
+        with ssh.open_sftp() as sftp:
+            import stat
+            if not stat.S_ISREG(sftp.stat(remote_pdf).st_mode):
+                raise RuntimeError('Primary PDF missing from SFTP: '+pdf_name)
+            remote_sha=hashlib.sha256()
+            with sftp.open(remote_pdf,'rb') as remote_input:
+                while True:
+                    piece=remote_input.read(1024*1024)
+                    if not piece:break
+                    remote_sha.update(piece)
+            if remote_sha.hexdigest()!=source_sha:
+                raise RuntimeError('Primary SFTP PDF does not match index source SHA-256')
+            parent=posixpath.dirname(index_dir)
+            for directory in (parent,index_dir):
+                try:
+                    st=sftp.stat(directory)
+                    if not stat.S_ISDIR(st.st_mode):
+                        raise RuntimeError('Index location is not a directory: '+directory)
+                except FileNotFoundError:
+                    sftp.mkdir(directory)
+            meta_bytes=json.dumps({
+                'ok':True,'date':date,'role':role,'sourceSha':source_sha,
+                'parserBuild':658,'pageLayoutBuild':595,
+                'updatedAt':int(time.time()),'compressedBytes':len(compressed)
+            },separators=(',',':')).encode('utf-8')
+            for remote,data in ((remote_index,compressed),(remote_meta,meta_bytes)):
+                tmp=remote+'.updating-'+str(os.getpid())
+                tmps.append(tmp)
+                with sftp.open(tmp,'wb') as output:output.write(data)
+                if sftp.stat(tmp).st_size!=len(data):
+                    raise RuntimeError('SFTP index transfer size mismatch')
+                with sftp.open(tmp,'rb') as check:
+                    check_hash=hashlib.sha256()
+                    while True:
+                        part=check.read(1024*1024)
+                        if not part:break
+                        check_hash.update(part)
+                if check_hash.digest()!=hashlib.sha256(data).digest():
+                    raise RuntimeError('SFTP index transfer SHA-256 mismatch')
+            # Write the metadata last; PHP only serves an index when it has both.
+            sftp.posix_rename(tmps[0],remote_index)
+            tmps.pop(0)
+            sftp.posix_rename(tmps[0],remote_meta)
+            tmps.pop(0)
+            if sftp.stat(remote_index).st_size!=len(compressed):
+                raise RuntimeError('Primary index final size mismatch')
+    finally:
+        try:
+            if 'sftp' in locals() and tmps:
+                with ssh.open_sftp() as cleanup:
+                    for tmp in tmps:
+                        try:cleanup.remove(tmp)
+                        except Exception:pass
+        except Exception:pass
+        ssh.close()
+    print(f'  [INDEX PUBLISHED SFTP] {date} {role}: {len(compressed)} bytes, remote SHA verified',flush=True)
+
 def _spr_publish_index(job,page,cfg):
     import json,base64,gzip
     date,role,sha,site=job['date'],job['role'],job['sha'],job['site']
