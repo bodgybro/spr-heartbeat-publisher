@@ -230,7 +230,7 @@ def apply(path):
     lines=source.splitlines(keepends=True)
     candidates=[n.lineno-1 for n in tree.body if isinstance(n,ast.If) and '__name__' in ast.get_source_segment(source,n.test)]
     if not candidates:raise RuntimeError('Updater main boundary missing')
-    at=candidates[-1]
+    at=candidates[0]
     updated=''.join(lines[:at])+EXTENSION+'\n'+''.join(lines[at:])
     compile(updated,str(path),'exec')
     path.write_text(updated,encoding='utf-8')
