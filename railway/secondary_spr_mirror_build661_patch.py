@@ -29,51 +29,10 @@ def upload_pdf(site,role,pdf,cfg,page=None):
         print('  [SECONDARY MIRROR QUEUE FAILED]',exc,flush=True)
     return result
 
-def _spr_mirror_secondary_one(job,cfg):
-    from urllib.parse import urlparse
-    import requests
-    date=job['date']
-    role='d' if job['role']=='drivers' else 'g'
-    headers=_cloud_worker_headers(cfg)
-    attempts=[]
-    for base in ('https://kustomvinyls.com/sps','https://www.kustomvinyls.com/sps'):
-        url=base+'/spr-pdf-sync.php'
-        for retry in range(2):
-            try:
-                r=requests.get(url,params={'date':date,'role':role,'refresh':'1'},
-                    headers=headers,timeout=(12,180),stream=True,allow_redirects=False,verify=False)
-                try:
-                    if r.status_code==200:
-                        print(f'  [SECONDARY MIRRORED] {date} {job["role"]} -> {urlparse(base).hostname}',flush=True)
-                        return
-                    if r.status_code in (301,302,303,307,308):
-                        # Do not forward updater secrets automatically to redirect targets.
-                        raise RuntimeError(f'HTTP {r.status_code}: noncanonical domain; trying other known domain')
-                    if r.status_code==404:
-                        raise RuntimeError('Mirror PHP endpoint not yet installed on secondary site')
-                    if r.status_code==401:
-                        raise RuntimeError('Secondary mirror worker key rejected')
-                    raise RuntimeError(f'HTTP {r.status_code}: {r.raw.read(180).decode("utf-8","replace")}')
-                finally:r.close()
-            except Exception as exc:
-                attempts.append(f'{urlparse(base).hostname}: {exc}')
-                if retry==0:
-                    time.sleep(3)
-    raise RuntimeError(' | '.join(attempts[-4:]))
-
 def _spr_mirror_secondary_worker(jobs):
-    if not _SPR_MIRROR_WORK_LOCK.acquire(blocking=False):
-        print('  [SECONDARY MIRROR DEFERRED] Previous copy still running',flush=True)
-        return
-    try:
-        cfg=load_config()
-        for job in jobs:
-            try:_spr_mirror_secondary_one(job,cfg)
-            except Exception as exc:
-                print(f'  [SECONDARY MIRROR FAILED] {job["date"]} {job["role"]}: {str(exc)[:500]}',flush=True)
-    except Exception as exc:
-        print('  [SECONDARY MIRROR WORKER ERROR]',exc,flush=True)
-    finally:_SPR_MIRROR_WORK_LOCK.release()
+    # Legacy queue retained for compatibility, but Kustom now receives its
+    # independent copy synchronously through _kustom_sftp_pdf().
+    return
 
 def run_update(site, *args, **kwargs):
     try:
@@ -446,6 +405,11 @@ def _spr_mirror_secondary_worker(jobs):
 
 print('  [DUAL INDEPENDENT STORES READY] SPR and roster uploads target both websites',flush=True)
 print('  [KUSTOM SFTP CODE READY] Secondary SPRs, rosters and indexes use independent SFTP; requires KUSTOM_SFTP_* settings',flush=True)
+try:
+    _host,_user,_root,_port=_kustom_sftp_config()
+    print('  [KUSTOM SFTP CONFIGURED] Separate destination and root present; connection is checked on update',flush=True)
+except Exception as exc:
+    print('  [KUSTOM SFTP NOT CONFIGURED] '+str(exc),flush=True)
 
 '''
 def apply(path):
@@ -465,6 +429,13 @@ def apply(path):
         raise RuntimeError('Primary SFTP PDF and index transfer paths missing; refusing deployment')
     if 'SFTP remote PDF SHA-256 mismatch' not in src:
         raise RuntimeError('Primary SFTP checksum validation missing; refusing deployment')
+    if ('def _kustom_sftp_pdf(' not in EXTENSION or
+        'def _kustom_sftp_roster(' not in EXTENSION or
+        'def _kustom_sftp_index_publish(' not in EXTENSION or
+        'result[label]=_kustom_sftp_pdf(pdf,role,sha)' not in EXTENSION):
+        raise RuntimeError('Kustom SFTP transport missing; refusing deployment')
+    if '_kustom_sftp_index_publish(date,role,sha,compressed)' not in src:
+        raise RuntimeError('Kustom SFTP prepared index publisher missing; refusing deployment')
     lines=src.splitlines(keepends=True)
     start_positions=[n.lineno-1 for n in tree.body if isinstance(n,ast.If) and '__name__' in (ast.get_source_segment(src,n.test) or '')]
     if not start_positions:raise RuntimeError('Main boundary not found')
