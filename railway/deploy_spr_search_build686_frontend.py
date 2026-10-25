@@ -60,7 +60,11 @@ def transform(n,t):
         import re
         sources=re.findall(r'script\\.js\\?v=(68[45])',t)
         labels=re.findall(r'class="build-number">Build (68[45])',t)
-        if len(sources)!=1 or len(labels)!=1 or sources[0]!=labels[0]:raise RuntimeError("Unexpected live HTML build markers")
+        if len(sources)!=1 or len(labels)!=1 or sources[0]!=labels[0]:
+            print("[HTML FORMAT INSPECT] scripts=",sources,"labels=",labels,flush=True)
+            print("[HTML SCRIPT SNIPPETS]",[t[max(0,m.start()-45):m.end()+45] for m in list(re.finditer(r"script\\.js",t))[:3]],flush=True)
+            print("[HTML BUILD SNIPPETS]",[t[max(0,m.start()-40):m.end()+40] for m in list(re.finditer(r"Build 68[0-9]",t))[:3]],flush=True)
+            raise RuntimeError("Unexpected live HTML build markers")
         old=sources[0]
         t=repl(t,"script.js?v="+old,"script.js?v=686","cache version")
         return repl(t,'class="build-number">Build '+old,'class="build-number">Build 686',"build label")
