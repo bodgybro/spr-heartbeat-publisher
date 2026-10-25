@@ -18,7 +18,7 @@ def classify(text):
  head=text[:240]
  counts={k:len(re.findall(r'\b'+k+r'\b',text,re.I)) for k in ('Driver','Guard','Drivers','Guards','Sydney Trains','Shift')}
  titles=re.findall(r'Sydney\s+Trains?\s+(?:Driver|Guard)\b',text,re.I)
- return {'head':head,'titles':titles[:5],'counts':counts}
+ return {'titles':titles[:5],'counts':counts,'length':len(text)}
 def main():
  e=os.environ;key_text=base64.b64decode(e['SFTP_PRIVATE_KEY_B64']).decode()
  k=None
