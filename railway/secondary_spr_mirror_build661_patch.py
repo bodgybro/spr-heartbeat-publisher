@@ -319,6 +319,13 @@ def apply(path):
     required={'upload_pdf','run_update','_cloud_worker_headers','load_config'}
     if not required<=funs:
         raise RuntimeError(f'Expected updater functions missing: {sorted(required-funs)}')
+    # Protect established primary transport across future patch revisions.
+    required_primary={'_spr_upload_over_sftp','_spr_upload_over_cpanel',
+        '_spr_publish_index_primary_sftp'}
+    if not required_primary<=funs:
+        raise RuntimeError('Primary SFTP PDF and index transfer paths missing; refusing deployment')
+    if 'SFTP remote PDF SHA-256 mismatch' not in src:
+        raise RuntimeError('Primary SFTP checksum validation missing; refusing deployment')
     lines=src.splitlines(keepends=True)
     start_positions=[n.lineno-1 for n in tree.body if isinstance(n,ast.If) and '__name__' in (ast.get_source_segment(src,n.test) or '')]
     if not start_positions:raise RuntimeError('Main boundary not found')
