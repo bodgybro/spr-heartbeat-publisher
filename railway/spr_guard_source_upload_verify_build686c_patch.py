@@ -421,7 +421,7 @@ def _spr686_guard_worker():
 
 # Do not race the Build 685 startup index repair. It exits on mismatched
 # source pages, and this thread holds the SharePoint profile lock for fetch.
-threading.Thread(target=_spr686_guard_worker,name='spr-guards-source-repair',daemon=True).start()
+print('  [GUARD PDF SOURCE VALIDATOR ACTIVE] Historical one-time Guards rebuild disabled; scheduled updates remain enabled',flush=True)
 print('  [SPR SOURCE VALIDATION 686 READY] Guard and Driver PDFs checked before any SFTP or cPanel upload',flush=True)
 '''
 def apply(path):
