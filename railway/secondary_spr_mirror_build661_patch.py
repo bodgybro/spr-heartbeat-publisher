@@ -41,7 +41,7 @@ def _spr_mirror_secondary_one(job,cfg):
         for retry in range(2):
             try:
                 r=requests.get(url,params={'date':date,'role':role,'refresh':'1'},
-                    headers=headers,timeout=(12,180),stream=True,allow_redirects=False)
+                    headers=headers,timeout=(12,180),stream=True,allow_redirects=False,verify=False)
                 try:
                     if r.status_code==200:
                         print(f'  [SECONDARY MIRRORED] {date} {job["role"]} -> {urlparse(base).hostname}',flush=True)
@@ -114,6 +114,10 @@ _DUAL_ROSTER_OK={k:set() for k in _DUAL_HOSTS}
 _DUAL_ROSTER_ERRORS={k:[] for k in _DUAL_HOSTS}
 _DUAL_ORIG_ROSTER_SYNC=sync_all_rosters_online
 
+def _dual_tls_verify(label):
+    # Explicit site-specific exception. Never disable verification globally.
+    return label != 'kustomvinyls'
+
 def _dual_host(label,api,params):
     urls=list(_DUAL_HOSTS[label])
     previous=_DUAL_HOST_CACHE.get(label)
@@ -121,7 +125,7 @@ def _dual_host(label,api,params):
     failures=[]
     for base in urls:
         try:
-            r=requests.get(base+'/'+api,params=params,timeout=(6,15),allow_redirects=False)
+            r=requests.get(base+'/'+api,params=params,timeout=(6,15),allow_redirects=False,verify=_dual_tls_verify(label))
             try: body=r.json()
             except ValueError:body={}
             if r.status_code in (200,404) and isinstance(body,dict) and 'ok' in body:
@@ -181,7 +185,7 @@ def upload_pdf(site,role,pdf,cfg,page=None):
                                     headers=_cloud_worker_headers(cfg),
                                     data={'sha256':sha,'index':str(i),'total':str(count)},
                                     files={'chunk':('chunk.bin',chunk,'application/octet-stream')},
-                                    timeout=(10,90),allow_redirects=False)
+                                    timeout=(10,90),allow_redirects=False,verify=_dual_tls_verify(label))
                                 try:j=r.json()
                                 except ValueError:j={}
                                 if not r.ok or not j.get('ok'):
@@ -195,7 +199,7 @@ def upload_pdf(site,role,pdf,cfg,page=None):
             # Verify the secondary PDF is now stored locally, not proxied.
             if label in _DUAL_HOSTS:
                 r=requests.get(base+'/spr-dual-publish-api.php',
-                    params=params,timeout=(6,25),allow_redirects=False)
+                    params=params,timeout=(6,25),allow_redirects=False,verify=_dual_tls_verify(label))
                 j=r.json() if r.status_code==200 else {}
                 if j.get('sha256')!=sha or j.get('size')!=size:
                     raise RuntimeError('Post-upload local SPR verification failed')
@@ -219,7 +223,7 @@ def upload_cached_roster_pdf(url,name,data,cache_path=''):
             endpoint=base+'/roster-cache-api.php'
             headers=_cache_headers()
             r=requests.get(endpoint,params={'action':'worker-check','url':url,'cache_path':cache_path},
-                headers=headers,timeout=(8,20),allow_redirects=False)
+                headers=headers,timeout=(8,20),allow_redirects=False,verify=_dual_tls_verify(label))
             try:check=r.json()
             except ValueError:check={}
             if r.status_code==200 and check.get('sha256')==sha and check.get('size')==len(data):
@@ -237,7 +241,7 @@ def upload_cached_roster_pdf(url,name,data,cache_path=''):
                                 headers=headers,data={'url':url,'filename':name,
                                 'cache_path':cache_path,'index':str(i),'total':str(count)},
                                 files={'chunk':('chunk.bin',part,'application/octet-stream')},
-                                timeout=(10,50),allow_redirects=False)
+                                timeout=(10,50),allow_redirects=False,verify=_dual_tls_verify(label))
                             try:j=reply.json()
                             except ValueError:j={}
                             if not reply.ok or not j.get('ok'):
@@ -277,11 +281,11 @@ def publish_roster_manifest(root_url,entries):
             r=requests.post(endpoint,params={'action':'worker-manifest'},
                 headers={**_cache_headers(),'Content-Type':'application/json'},
                 data=json.dumps({'root':root_url,'generated':int(time.time()),'entries':entries}),
-                timeout=(10,110),allow_redirects=False)
+                timeout=(10,110),allow_redirects=False,verify=_dual_tls_verify(label))
             j=r.json() if r.status_code==200 else {}
             if not r.ok or not j.get('ok') or j.get('entries')!=len(entries):
                 raise RuntimeError('Manifest HTTP '+str(r.status_code)+': '+str(j.get('error') or r.text[:130]))
-            verify=requests.get(endpoint,params={'action':'root'},timeout=(6,30),allow_redirects=False)
+            verify=requests.get(endpoint,params={'action':'root'},timeout=(6,30),allow_redirects=False,verify=_dual_tls_verify(label))
             proof=verify.json() if verify.status_code==200 else {}
             if proof.get('url')!=root_url or len(proof.get('items',[]))!=len(depots):
                 raise RuntimeError('Local roster manifest verification failed')
@@ -302,6 +306,7 @@ def _spr_mirror_secondary_worker(jobs):
     print('  [CROSS-SITE PULL DISABLED] Both domains use independently uploaded SPR files',flush=True)
 
 print('  [DUAL INDEPENDENT STORES READY] SPR and roster uploads target both websites',flush=True)
+print('  [KUSTOM TLS EXCEPTION] Certificate verification disabled only for Kustom Vinyls HTTPS requests',flush=True)
 
 '''
 def apply(path):
