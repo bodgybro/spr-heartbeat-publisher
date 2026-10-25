@@ -60,14 +60,11 @@ def transform(n,t):
         import re
         sources=re.findall(r'script\\.js\\?v=(68[45])',t)
         labels=re.findall(r'class="build-number">Build (68[45])',t)
-        if len(sources)!=1 or len(labels)!=1 or sources[0]!=labels[0]:
-            print("[HTML FORMAT INSPECT] scripts=",sources,"labels=",labels,flush=True)
-            print("[HTML SCRIPT SNIPPETS]",[t[max(0,m.start()-45):m.end()+45] for m in list(re.finditer(r"script\\.js",t))[:3]],flush=True)
-            print("[HTML BUILD SNIPPETS]",[t[max(0,m.start()-40):m.end()+40] for m in list(re.finditer(r"Build 68[0-9]",t))[:3]],flush=True)
+        if labels!=["685"] or (sources and sources!=["685"]):
             raise RuntimeError("Unexpected live HTML build markers")
-        old=sources[0]
-        t=repl(t,"script.js?v="+old,"script.js?v=686","cache version")
-        return repl(t,'class="build-number">Build '+old,'class="build-number">Build 686',"build label")
+        if sources:
+            t=repl(t,"script.js?v=685","script.js?v=686","cache version")
+        return repl(t,'class="build-number">Build 685','class="build-number">Build 686',"build label")
     t=repl(t,"async function loadOnlinePdf(){",HELPER+"async function loadOnlinePdf(){","helper")
     t=repl(t,"  const selectedDate=ui.date.value,selectedRole=ui.role.value;\n",
         "  const selectedDate=ui.date.value,selectedRole=ui.role.value;\n  const loadSerial=++sprLoadSerial;\n  const sameSelection=()=>loadSerial===sprLoadSerial&&ui.date.value===selectedDate&&ui.role.value===selectedRole;\n","serial")
