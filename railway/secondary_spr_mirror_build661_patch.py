@@ -312,14 +312,11 @@ def apply(path):
     lines=src.splitlines(keepends=True)
     start_positions=[n.lineno-1 for n in tree.body if isinstance(n,ast.If) and '__name__' in (ast.get_source_segment(src,n.test) or '')]
     if not start_positions:raise RuntimeError('Main boundary not found')
-    # Insert BEFORE the actual server.serve_forever startup guard. Earlier
-    # compatibility patches can add other __name__ checks elsewhere.
-    startup_guards=[n for n in tree.body if isinstance(n,ast.If) and
-        '__name__' in (ast.get_source_segment(src,n.test) or '') and
-        'serve_forever' in (ast.get_source_segment(src,n) or '')]
-    if len(startup_guards)!=1:
-        raise RuntimeError('Cannot locate the unique updater server entrypoint safely')
-    at=startup_guards[0].lineno-1
+    # Install directly after the last effective run_update wrapper. This
+    # guarantees that the new definitions execute before the server starts.
+    run_nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='run_update']
+    if not run_nodes:raise RuntimeError('Updater run_update function not found')
+    at=run_nodes[-1].end_lineno
     updated=''.join(lines[:at])+EXTENSION+'\n'+''.join(lines[at:])
     # Every wrapper must forward include_rosters to a base function that accepts it.
     # The older Cloudflare patch can change the roster body without changing its
