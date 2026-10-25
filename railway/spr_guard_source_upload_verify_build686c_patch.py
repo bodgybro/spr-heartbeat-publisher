@@ -301,133 +301,7 @@ def _spr686_direct_guard26():
                             print('  [GUARD26 FILE NAMES] '+repr([str(item.get('Name') or '')[:90] for item in files[:35]]),flush=True)
                         for item in files:
                             remote=unquote(str(item.get('ServerRelativeUrl') or ''))
-                            if re.search(r'/Guard_[^/]+_26_10_2026\.pdf
-                    except Exception as exc:
-                        print('  [GUARD26 SHAREPOINT FILES ERROR] '+str(exc).splitlines()[0][:110],flush=True)
-            for folder in dayfolders:
-                for filename in ('All Guards Combined 26_10_2026.pdf',
-                                 'All Guards Combined 26-10-2026.pdf',
-                                 'All Guards Combined 26.10.2026.pdf'):
-                    add_pdf(folder+'/'+filename)
-            print('  [GUARD26 EXACT-PATH CANDIDATES] '+str(len(pdfpaths)),flush=True)
-            from pathlib import Path
-            with tempfile.TemporaryDirectory(prefix='guard26-') as tmp:
-                temp=Path(tmp)
-                source=None;sha=None
-                for i,path in enumerate(pdfpaths):
-                    endpoints=[origin+quote(path,safe='/')]
-                    for api in site_apis:
-                        endpoints.append(api+"/GetFileByServerRelativePath(decodedUrl='"+
-                            quote(path.replace("'","''"),safe="/-._~")+
-                            "')/$value")
-                    for ep in endpoints:
-                        try:
-                            response=context.request.get(ep,timeout=45000)
-                            if not response.ok:continue
-                            payload=response.body()
-                            if not payload.startswith(b'%PDF') or len(payload)<50000:continue
-                            candidate=temp/('candidate'+str(i)+'.pdf')
-                            candidate.write_bytes(payload)
-                            _spr686_check_pdf_role(candidate,'guards')
-                            source=candidate
-                            sha=hashlib.sha256(payload).hexdigest()
-                            break
-                        except Exception as exc:
-                            print('  [GUARD26 REJECTED PDF] '+type(exc).__name__+': '+str(exc).splitlines()[0][:140],flush=True)
-                    if source:break
-                # Build the full combined PDF from every depot report. A
-                # single Guard depot PDF is not a valid combined SPR.
-                expected={'LEPPINGTON_YARD','BLACKTOWN','CAMPBELLTOWN','CRONULLA',
-                          'CENTRAL','MORTDALE','HORNSBY','RICHMOND','NORTH_SYDNEY',
-                          'PENRITH','AUBURN_YARD','FLEMINGTON','WATERFALL'}
-                found={}
-                for path in depotpaths:
-                    m=re.search(r'/Guard_(.+?)_26_10_2026\.pdf$',path,re.I)
-                    if m and m.group(1).upper() in expected:found[m.group(1).upper()]=path
-                if set(found)!=expected:
-                    raise RuntimeError('Cannot safely combine: Guards depot PDFs missing '+repr(sorted(expected-set(found))))
-                from pypdf import PdfReader,PdfWriter
-                from io import BytesIO
-                writer=PdfWriter()
-                totalpages=0
-                for depot in sorted(expected):
-                    remote=found[depot]
-                    response=context.request.get(origin+quote(remote,safe='/'),timeout=70000)
-                    if not response.ok:raise RuntimeError('Guard depot PDF failed '+depot+' HTTP '+str(response.status))
-                    data=response.body()
-                    if not data.startswith(b'%PDF'):raise RuntimeError('Not a PDF: '+depot)
-                    reader=PdfReader(BytesIO(data),strict=False)
-                    if len(reader.pages)<1:raise RuntimeError('Empty Guards depot PDF: '+depot)
-                    heading=(reader.pages[0].extract_text() or '')[:1400]
-                    if not re.search(r'Sydney\s+Trains?\s+Guard\b',heading,re.I) or re.search(r'Sydney\s+Trains?\s+Driver\b',heading,re.I):
-                        raise RuntimeError('Wrong printed role in Guards depot PDF: '+depot)
-                    totalpages+=len(reader.pages)
-                    writer.append(reader)
-                    print('  [GUARD26 DEPOT VERIFIED] '+depot+' '+str(len(reader.pages))+' pages',flush=True)
-                if totalpages<100:raise RuntimeError('Guards combined PDF too small: '+str(totalpages)+' pages')
-                combined=temp/'all-guards-rebuilt.pdf'
-                with combined.open('wb') as f:writer.write(f)
-                writer.close()
-                _spr686_check_pdf_role(combined,'guards')
-                source=combined
-                sha=hashlib.sha256(source.read_bytes()).hexdigest()
-                print('  [GUARD26 COMBINED REBUILT] '+str(len(expected))+' Guards depots, '+str(totalpages)+' pages',flush=True)
-                final=temp/'All Guards Combined 26_10_2026.pdf'
-                source.replace(final)
-                upload_pdf('https://www.bodgybros.com/sps','guards',final,cfg,page)
-                print('  [GUARD26 UPLOADED] 26 October correct original Guards PDF verified by SFTP',flush=True)
-        finally:
-            context.close()
-            _wait_for_sharepoint_profile_release(6)
-    if sha:
-        print('  [GUARD26 REINDEX] 2026-10-26 guard only',flush=True)
-        _spr_index_background([{'date':'2026-10-26','role':'guard','sha':sha,
-            'site':'https://www.bodgybros.com/sps'}])
-        if _spr_primary_index_current('2026-10-26','guard',sha):
-            print('  [GUARD26 COMPLETE] Source and index confirmed',flush=True)
-        else:
-            print('  [GUARD26 INDEX NOT VERIFIED] Source repaired, search index pending',flush=True)
-        return True
-    return False
-
-_spr686_old_repair_today_guards=_spr686_repair_today_guards
-def _spr686_repair_today_guards():
-    try:
-        if _spr686_direct_guard26():return
-    except Exception as exc:
-        print('  [GUARD26 DIRECT LOOKUP FAILED] '+type(exc).__name__+': '+str(exc).splitlines()[0][:170],flush=True)
-    # Keep the existing guarded SharePoint browser workflow as fallback;
-    # it also refuses Driver PDFs and never overwrites on failure.
-    return _spr686_old_repair_today_guards()
-
-def _spr686_guard_worker():
-    try:_spr686_repair_today_guards()
-    except Exception as exc:
-        print('  [GUARDS REPAIR FAILED] '+type(exc).__name__+': '+str(exc).splitlines()[0][:220],flush=True)
-
-# Do not race the Build 685 startup index repair. It exits on mismatched
-# source pages, and this thread holds the SharePoint profile lock for fetch.
-threading.Thread(target=_spr686_guard_worker,name='spr-guards-source-repair',daemon=True).start()
-print('  [SPR SOURCE VALIDATION 686 READY] Guard and Driver PDFs checked before any SFTP or cPanel upload',flush=True)
-'''
-def apply(path):
- source=path.read_text(encoding='utf-8')
- if MARKER in source:
-  print('SPR source role guard Build 686 already installed',flush=True);return
- t=ast.parse(source)
- if not all(any(isinstance(n,ast.FunctionDef) and n.name==k for n in t.body)
-  for k in ('upload_pdf','_spr_index_background','_spr_primary_index_current','download_with_browser','eligible_targets')):
-  raise RuntimeError('Expected SPR updater, SharePoint and SFTP preindex methods missing')
- starts=[n.lineno-1 for n in t.body if isinstance(n,ast.If) and '__name__' in (ast.get_source_segment(source,n.test) or '')]
- if not starts:raise RuntimeError('No service entrypoint found')
- i=min(starts)
- lines=source.splitlines(keepends=True)
- modified=''.join(lines[:i])+EXTRA+'\n'+''.join(lines[i:])
- compile(modified,str(path),'exec')
- path.write_text(modified,encoding='utf-8')
- print('[GUARDS SOURCE PATCH 686 INSTALLED] Validating PDF role before upload; repairing current Guards SPR',flush=True)
-if __name__=='__main__':apply(Path(sys.argv[1]))
-,remote,re.I) and remote not in depotpaths:
+                            if re.search(r'/Guard_[^/]+_26_10_2026\.pdf$',remote,re.I) and remote not in depotpaths:
                                 depotpaths.append(remote)
                             add_pdf(remote)
                     except Exception as exc:
@@ -463,9 +337,44 @@ if __name__=='__main__':apply(Path(sys.argv[1]))
                         except Exception as exc:
                             print('  [GUARD26 REJECTED PDF] '+type(exc).__name__+': '+str(exc).splitlines()[0][:140],flush=True)
                     if source:break
-                if source is None:
-                    print('  [GUARD26 DIRECT SOURCE NOT FOUND] No correctly headed PDF; existing file preserved',flush=True)
-                    return False
+                # A single depot PDF is NOT the full Guards combined report.
+                # The supplied Combined file has Driver headings on this date,
+                # so require ALL 13 independent Guards depot PDFs instead.
+                expected={'LEPPINGTON_YARD','BLACKTOWN','CAMPBELLTOWN','CRONULLA',
+                          'CENTRAL','MORTDALE','HORNSBY','RICHMOND','NORTH_SYDNEY',
+                          'PENRITH','AUBURN_YARD','FLEMINGTON','WATERFALL'}
+                found={}
+                for path in depotpaths:
+                    m=re.search(r'/Guard_(.+?)_26_10_2026\.pdf$',path,re.I)
+                    if m and m.group(1).upper() in expected:found[m.group(1).upper()]=path
+                if set(found)!=expected:
+                    raise RuntimeError('Cannot safely combine: Guards depot PDFs missing '+repr(sorted(expected-set(found))))
+                from pypdf import PdfReader,PdfWriter
+                from io import BytesIO
+                writer=PdfWriter()
+                totalpages=0
+                for depot in sorted(expected):
+                    remote=found[depot]
+                    response=context.request.get(origin+quote(remote,safe='/'),timeout=70000)
+                    if not response.ok:raise RuntimeError('Guard depot PDF failed '+depot+' HTTP '+str(response.status))
+                    data=response.body()
+                    if not data.startswith(b'%PDF'):raise RuntimeError('Not a PDF: '+depot)
+                    reader=PdfReader(BytesIO(data),strict=False)
+                    if len(reader.pages)<1:raise RuntimeError('Empty Guards depot PDF: '+depot)
+                    heading=(reader.pages[0].extract_text() or '')[:1400]
+                    if not re.search(r'Sydney\s+Trains?\s+Guard\b',heading,re.I) or re.search(r'Sydney\s+Trains?\s+Driver\b',heading,re.I):
+                        raise RuntimeError('Wrong printed role in Guards depot PDF: '+depot)
+                    totalpages+=len(reader.pages)
+                    writer.append(reader)
+                    print('  [GUARD26 DEPOT VERIFIED] '+depot+' '+str(len(reader.pages))+' pages',flush=True)
+                if totalpages<100:raise RuntimeError('Guards combined PDF too small: '+str(totalpages)+' pages')
+                combined=temp/'all-guards-rebuilt.pdf'
+                with combined.open('wb') as f:writer.write(f)
+                writer.close()
+                _spr686_check_pdf_role(combined,'guards')
+                source=combined
+                sha=hashlib.sha256(source.read_bytes()).hexdigest()
+                print('  [GUARD26 COMBINED REBUILT] '+str(len(expected))+' Guards depots, '+str(totalpages)+' pages',flush=True)
                 final=temp/'All Guards Combined 26_10_2026.pdf'
                 source.replace(final)
                 upload_pdf('https://www.bodgybros.com/sps','guards',final,cfg,page)
