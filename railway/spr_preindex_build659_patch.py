@@ -103,8 +103,8 @@ def _spr_index_background(jobs):
     except Exception as exc:print('  [INDEX BACKGROUND ERROR]',exc,flush=True)
     finally:_SPR_INDEX_RUNNING.release()
 
-def run_update(site):
-    try:return _SPR_RUN_UPDATE_ORIGINAL(site)
+def run_update(site, *args, **kwargs):
+    try:return _SPR_RUN_UPDATE_ORIGINAL(site, *args, **kwargs)
     finally:
         # Do not delay or overwrite existing SPR + roster completion results.
         with _SPR_INDEX_LOCK:
