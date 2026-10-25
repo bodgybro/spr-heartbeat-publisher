@@ -316,7 +316,9 @@ def apply(path):
     # guarantees that the new definitions execute before the server starts.
     run_nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='run_update']
     if not run_nodes:raise RuntimeError('Updater run_update function not found')
-    at=run_nodes[-1].end_lineno
+    preindex=[n for n in run_nodes if '_SPR_RUN_UPDATE_ORIGINAL' in (ast.get_source_segment(src,n) or '')]
+    if len(preindex)!=1:raise RuntimeError('Expected exactly one pre-index run_update wrapper')
+    at=preindex[0].end_lineno
     updated=''.join(lines[:at])+EXTENSION+'\n'+''.join(lines[at:])
     # Every wrapper must forward include_rosters to a base function that accepts it.
     # The older Cloudflare patch can change the roster body without changing its
