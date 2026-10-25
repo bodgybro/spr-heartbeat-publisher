@@ -228,7 +228,7 @@ def _spr_publish_index(job,page,cfg):
 def _x_shift_bootstrap():
     # Catch up the active range; pre-indexing and PDF uploads remain independent.
     current=_x_datetime.datetime.now(_x_ZoneInfo('Australia/Sydney')).date()
-    for day in (current,current+_x_datetime.timedelta(days=1)):
+    for day in (current+_x_datetime.timedelta(days=1),current):
         for role in ('d','g'):
             _x_shift_schedule(day.strftime('%Y-%m-%d'),role)
     _x_shift_worker()
