@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""One-time RC1 on Bodgybros: live label, paths.txt and live-root ZIP."""
+"""One-time RC1 backup-only: archive actual live application files. NEVER rename the live build."""
 import os,io,base64,hashlib,posixpath,zipfile,json,urllib.request
 import paramiko
-DOC_URL="https://raw.githubusercontent.com/bodgybro/spr-heartbeat-publisher/8666148d174bbd5fa916ae9b9efed4d8c0bb1a43/railway/docs/paths-RC1.txt"
+DOC_URL="https://raw.githubusercontent.com/bodgybro/spr-heartbeat-publisher/13ef5cbac13644b0cd8d85ea389fbf5a5c3747ce/railway/docs/paths-RC1.txt"
 ZIP="SPR-Search-RC1-Bodgybros.zip"
 FILES=(".htaccess","admin-api.php","admin.js","auth-api.php","index.html",
        "index.php","roster-cache-api.php","roster-relay-api.php","script.js",
@@ -36,15 +36,10 @@ def main():
                    (b"function sprSelectionMatches(",b"function sprOriginalPdfMatchesIndex(",
                     b"async function prepareShiftPdfUrl(",b"async function loadOnlinePdf(){")):
             raise RuntimeError("Live script differs from working 687; cannot snapshot")
+        # BACKUP ONLY. Keep live HTML, JS and visible Build 687 unchanged.
         for name in ("index.php","index.html"):
-            old=app[name].decode()
-            if 'class="build-number">Build 687' in old and "script.js?v=687" in old:
-                new=old.replace('class="build-number">Build 687',
-                                'class="build-number">RC1',1).replace("script.js?v=687","script.js?v=RC1",1)
-            elif 'class="build-number">RC1' in old and "script.js?v=RC1" in old:
-                new=old
-            else:raise RuntimeError("Unrecognised live "+name+"; nothing installed")
-            app[name]=new.encode()
+            if b'Build 687' not in app[name]:
+                raise RuntimeError("Unexpected live "+name+" - abort snapshot")
         note=urllib.request.urlopen(DOC_URL,timeout=20).read()
         if not note.startswith(b"SPR SEARCH RC1"):raise RuntimeError("Unexpected paths.txt source")
         doc_path=posixpath.join(root,"paths.txt")
@@ -56,7 +51,7 @@ def main():
             note=existing
         app["paths.txt"]=note
         app["README-RC1.txt"]=(
-            "SPR Search RC1 (working Build 687)\n"
+            "SPR Search RC1 backup of live Build 687 (no live modifications)\n"
             "ZIP is a flat snapshot of verified live application files.\n"
             "Restore files into public_html/sps. See paths.txt.\n"
             "Live SPR PDFs, indexes, rosters and credentials are excluded.\n").encode()
@@ -69,8 +64,7 @@ def main():
         with zipfile.ZipFile(io.BytesIO(package)) as z:
             if z.testzip() or set(z.namelist())!=set(app):raise RuntimeError("Bad ZIP")
             if any(z.read(n)!=data for n,data in app.items()):raise RuntimeError("ZIP data mismatch")
-        changes={"index.php":app["index.php"],"index.html":app["index.html"],
-                 "paths.txt":note,ZIP:package}
+        changes={ZIP:package}
         original={}
         for name in changes:
             try:original[name]=read(s,posixpath.join(root,name))
@@ -102,6 +96,6 @@ def main():
             for name,tmp,dest in staged:
                 try:s.remove(tmp)
                 except Exception:pass
-        print("[RC1 COMPLETE] ZIP",len(package),"bytes; files",len(app),flush=True)
+        print("[RC1 BACKUP COMPLETE] Live Build 687 unchanged; ZIP",len(package),"bytes; files",len(app),flush=True)
     finally:s.close();ssh.close()
 if __name__=="__main__":main()
