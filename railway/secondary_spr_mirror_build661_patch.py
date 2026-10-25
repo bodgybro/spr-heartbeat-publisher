@@ -75,9 +75,9 @@ def _spr_mirror_secondary_worker(jobs):
         print('  [SECONDARY MIRROR WORKER ERROR]',exc,flush=True)
     finally:_SPR_MIRROR_WORK_LOCK.release()
 
-def run_update(site):
+def run_update(site, *args, **kwargs):
     try:
-        return _SPR_MIRROR_UPDATE_ORIGINAL(site)
+        return _SPR_MIRROR_UPDATE_ORIGINAL(site, *args, **kwargs)
     finally:
         # Separate background task: cannot invalidate successful PDF/roster transfers.
         with _SPR_MIRROR_LOCK:
