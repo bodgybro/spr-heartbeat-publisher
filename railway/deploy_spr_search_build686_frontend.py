@@ -57,8 +57,13 @@ def repl(t,a,b,label):
     return t.replace(a,b)
 def transform(n,t):
     if n!="script.js":
-        t=repl(t,"script.js?v=684","script.js?v=686","cache version")
-        return repl(t,'class="build-number">Build 684','class="build-number">Build 686',"build label")
+        import re
+        sources=re.findall(r'script\\.js\\?v=(68[45])',t)
+        labels=re.findall(r'class="build-number">Build (68[45])',t)
+        if len(sources)!=1 or len(labels)!=1 or sources[0]!=labels[0]:raise RuntimeError("Unexpected live HTML build markers")
+        old=sources[0]
+        t=repl(t,"script.js?v="+old,"script.js?v=686","cache version")
+        return repl(t,'class="build-number">Build '+old,'class="build-number">Build 686',"build label")
     t=repl(t,"async function loadOnlinePdf(){",HELPER+"async function loadOnlinePdf(){","helper")
     t=repl(t,"  const selectedDate=ui.date.value,selectedRole=ui.role.value;\n",
         "  const selectedDate=ui.date.value,selectedRole=ui.role.value;\n  const loadSerial=++sprLoadSerial;\n  const sameSelection=()=>loadSerial===sprLoadSerial&&ui.date.value===selectedDate&&ui.role.value===selectedRole;\n","serial")
@@ -104,8 +109,13 @@ def main():
                 print("[BUILD 686 ALREADY PRESENT]",n,flush=True);continue
             if sha(old)!=hashes[0]:
                 print("[LIVE SOURCE DIFFERENT]",n,sha(old),flush=True)
-                if n!="script.js" or b"function sprSelectionMatches(" in old or b"async function loadOnlinePdf(){" not in old:
-                    raise RuntimeError("Unrecognised live source for "+n+"; no files changed")
+                if n=="script.js":
+                    if b"function sprSelectionMatches(" in old or b"async function loadOnlinePdf(){" not in old:
+                        raise RuntimeError("Unrecognised live JS source; no files changed")
+                elif n in ("index.php","index.html"):
+                    if not (b"script.js?v=685" in old and b'class="build-number">Build 685' in old):
+                        raise RuntimeError("Unrecognised live HTML source; no files changed")
+                else:raise RuntimeError("Unrecognised live source "+n)
             new=transform(n,old.decode()).encode()
             if sha(old)==hashes[0] and sha(new)!=hashes[1]:raise RuntimeError("Patch SHA mismatch for "+n+"; no files changed")
             originals[n]=old;updated[n]=new
