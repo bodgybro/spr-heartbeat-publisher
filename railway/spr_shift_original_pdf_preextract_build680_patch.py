@@ -85,7 +85,16 @@ def _x_shift_sftp():
         finally:ssh.close()
 
 def _x_read_remote(sftp,remote):
-    with sftp.open(remote,'rb') as stream:return stream.read()
+    size=sftp.stat(remote).st_size
+    if size>262144:
+        print(f'  [SHIFT SFTP READING] {_x_path.basename(remote)}: {size} bytes (prefetched)',flush=True)
+    with sftp.open(remote,'rb') as stream:
+        if size>262144:
+            stream.prefetch(file_size=size,max_concurrent_requests=16)
+        payload=stream.read()
+    if len(payload)!=size:
+        raise RuntimeError('Shift input file size changed while downloading')
+    return payload
 
 def _x_mkdir(sftp,root,role,date):
     for part in ('x','x/'+role,'x/'+role+'/'+date):
@@ -115,6 +124,7 @@ def _x_write_verified(sftp,target,payload):
 
 def _x_shift_job(date,role):
     import fitz
+    print(f'  [SHIFT CACHE START] {date} {role}',flush=True)
     if not re.fullmatch(r'\d{4}-\d\d-\d\d',date) or role not in ('d','g'):
         raise RuntimeError('Invalid SPR shift extraction target')
     with _X_SHIFT_LOCK:
