@@ -154,8 +154,11 @@ def _x_shift_job(date,role):
             if not shift_map:raise RuntimeError('Prepared SPR contains no mapped shifts')
             out_dir=_x_path.join(spr,'x',role,date)
             manifest_path=_x_path.join(out_dir,'manifest.json')
+            already_done=set()
             try:
                 old=json.loads(_x_read_remote(sftp,manifest_path).decode('utf-8'))
+                if old.get('sourceSha')==expected and old.get('version')==680:
+                    already_done=set(old.get('shifts') or []).intersection(shift_map)
                 if (old.get('sourceSha')==expected and old.get('version')==680
                     and len(old.get('shifts') or [])==len(shift_map)
                     and set(old.get('shifts') or [])==set(shift_map)):
@@ -178,6 +181,15 @@ def _x_shift_job(date,role):
                 count=0
                 for shift in priority:
                     pages=shift_map[shift]
+                    target=_x_path.join(out_dir,shift+'.pdf')
+                    if shift in already_done:
+                        try:
+                            if sftp.stat(target).st_size>500:
+                                count+=1
+                                if count==1 or count%30==0:
+                                    print(f'  [SHIFT PDF CACHE RESUMED] {date} {role} {count}/{len(shift_map)}',flush=True)
+                                continue
+                        except FileNotFoundError:pass
                     extracted=fitz.open()
                     try:
                         for p in pages:
