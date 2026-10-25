@@ -194,6 +194,12 @@ def _kustom_sftp_roster(url,cache_path,data,sha):
 def _kustom_sftp_manifest(root_url,entries):
     import posixpath
     with _kustom_sftp_open() as (sftp,root):
+        # Preserve the same private-cache access restriction used by the PHP store.
+        private_rule=posixpath.join(root,'.roster-cache','.htaccess')
+        try:sftp.stat(private_rule)
+        except FileNotFoundError:
+            _kustom_sftp_store(sftp,root,'.roster-cache/.htaccess',
+                b'Require all denied\nDeny from all\n')
         for e in entries:
             if e.get('kind')!='pdf':continue
             proof=_KUSTOM_ROSTER_PROOFS.get(e.get('url'))
