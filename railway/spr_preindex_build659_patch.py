@@ -151,22 +151,12 @@ def _spr_publish_index(job,page,cfg):
             print(f'  [INDEX META CHECK] {date} {role}: {exc}',flush=True)
         pending.append(target)
     if not pending:
-        # An unchanged primary index may still need to be seeded to the mirror.
-        secondary_current=False
-        for base in ('https://www.kustomvinyls.com/sps','https://kustomvinyls.com/sps'):
-            try:
-                reply=requests.get(base+'/spr-index-api.php',
-                    params={'action':'meta','date':date,'role':role},
-                    timeout=(6,15),allow_redirects=False,verify=False)
-                info=reply.json() if reply.status_code==200 else {}
-                if (info.get('sourceSha')==sha and info.get('parserBuild')==658
-                    and info.get('pageLayoutBuild')==595):
-                    secondary_current=True
-                    break
-            except Exception:pass
-        if secondary_current:
-            print(f'  [INDEXES CURRENT] {date} {role}: primary and secondary',flush=True)
-            return
+        try:
+            if _kustom_sftp_index_matches(date,role,sha):
+                print(f'  [INDEXES CURRENT ON BOTH SFTP SITES] {date} {role}',flush=True)
+                return
+        except Exception as exc:
+            print(f'  [KUSTOM SFTP INDEX CHECK] {date} {role}: {str(exc)[:220]}',flush=True)
     # Build against either website's local PDF; primary outage must not stop
     # the independent secondary from receiving its prepared index.
     index_source=None
@@ -209,48 +199,16 @@ def _spr_publish_index(job,page,cfg):
             print(f'  [INDEX PUBLISHED] {date} {role} {target}',flush=True)
         except Exception as exc:failures.append(f'{target}: {exc}')
     if failures:print('  [PRIMARY INDEX FAILED] '+' | '.join(failures),flush=True)
-    # Publish the exact same pre-built index to the secondary mirror.
-    # Independent retries protect Bodgybros performance and completion reporting.
-    secondary_bases=('https://www.kustomvinyls.com/sps','https://kustomvinyls.com/sps')
-    secondary_error=None
-    for attempt in range(1,7):
-        for base in secondary_bases:
-            endpoint=base+'/spr-index-api.php'
-            try:
-                meta=requests.get(endpoint,
-                    params={'action':'meta','date':date,'role':role},
-                    timeout=(8,20),allow_redirects=False,verify=False)
-                if meta.status_code in (301,302,303,307,308):
-                    raise RuntimeError('redirected index endpoint')
-                if meta.status_code==404:
-                    raise RuntimeError('spr-index-api.php not installed on secondary site (HTTP 404)')
-                if not meta.ok:
-                    raise RuntimeError('index meta HTTP '+str(meta.status_code))
-                try:info=meta.json()
-                except ValueError as exc:raise RuntimeError('index meta is not JSON') from exc
-                if (info.get('sourceSha')==sha and info.get('parserBuild')==658
-                    and info.get('pageLayoutBuild')==595):
-                    print(f'  [SECONDARY INDEX CURRENT] {date} {role} {base}',flush=True)
-                    if failures:raise RuntimeError(' | '.join(failures))
-                    return
-                posted=requests.post(endpoint,
-                    params={'action':'publish','date':date,'role':role},
-                    data=compressed,headers=headers,timeout=(10,180),
-                    allow_redirects=False,verify=False)
-                try:result=posted.json()
-                except ValueError:result={}
-                if posted.status_code!=200 or result.get('ok') is not True:
-                    raise RuntimeError(f'index publish HTTP {posted.status_code}: {posted.text[:160]}')
-                print(f'  [SECONDARY INDEX PUBLISHED] {date} {role} {base}',flush=True)
-                if failures:raise RuntimeError(' | '.join(failures))
-                return
-            except Exception as exc:
-                secondary_error=f'{base}: {str(exc)[:180]}'
-        if attempt<6:
-            print(f'  [SECONDARY INDEX RETRY] {date} {role} attempt {attempt}: {secondary_error}',flush=True)
-            time.sleep(15)
-    print(f'  [SECONDARY INDEX FAILED] {date} {role}: {secondary_error}',flush=True)
-    failures.append(str(secondary_error))
+    # Kustom receives its own prepared index directly over authenticated SFTP.
+    # Primary and secondary success/failure are reported independently.
+    try:
+        if _kustom_sftp_index_matches(date,role,sha):
+            print(f'  [KUSTOM SFTP INDEX CURRENT] {date} {role}',flush=True)
+        else:
+            _kustom_sftp_index_publish(date,role,sha,compressed)
+    except Exception as exc:
+        failures.append('kustomvinyls: '+str(exc)[:350])
+        print(f'  [KUSTOM SFTP INDEX FAILED] {date} {role}: {exc}',flush=True)
     if failures:raise RuntimeError(' | '.join(failures))
 
 def _spr_index_background(jobs):
