@@ -71,7 +71,7 @@ def _spr685_repair_guard():
     except Exception as exc:
         print(f'  [INDEX ROLE REPAIR FAILED] {date}: {type(exc).__name__}: {str(exc)[:190]}',flush=True)
 
-threading.Thread(target=_spr685_repair_guard,daemon=True,name='spr-guard-index-role-repair').start()
+print('  [GUARD INDEX VALIDATOR ACTIVE] Historical one-time auto-repair disabled; standard indexed publication remains enabled',flush=True)
 print('  [INDEX ROLE GUARD 685 READY] Guard and Driver page headings verified before publishing',flush=True)
 '''
 def set_func(code,tree,name,edits):
