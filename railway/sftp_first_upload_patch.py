@@ -92,6 +92,20 @@ def _spr_upload_over_sftp(role, pdf):
             tmp=None
             if sftp.stat(remote).st_size!=Path(pdf).stat().st_size:
                 raise RuntimeError("SFTP final file size does not match")
+            # Verify the actual remote bytes over SFTP; HTTP endpoint checks
+            # must never determine success for the primary website.
+            import hashlib
+            with Path(pdf).open("rb") as inp:
+                local_sha=hashlib.file_digest(inp,"sha256").hexdigest()
+            remote_hash=hashlib.sha256()
+            with sftp.open(remote,"rb") as remote_input:
+                while True:
+                    block=remote_input.read(1024*1024)
+                    if not block: break
+                    remote_hash.update(block)
+            if remote_hash.hexdigest()!=local_sha:
+                raise RuntimeError("SFTP remote PDF SHA-256 mismatch")
+            print("  [SFTP PDF VERIFIED] "+filename+" "+local_sha[:12],flush=True)
         finally:
             if tmp:
                 try: sftp.remove(tmp)
