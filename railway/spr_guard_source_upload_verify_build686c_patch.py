@@ -230,6 +230,17 @@ def _spr686_direct_guard26():
     import tempfile,hashlib,posixpath
     from datetime import date
     target=date(2026,10,26)
+    # The 26 October repair is one-off. Once the full Guard index has been
+    # published and role-validated, never rebuild/upload this day on
+    # subsequent Railway restarts. Keep normal PDF role checks active.
+    try:
+        prior=_spr686_read_guard_meta(target)
+        if prior.get('roleValidated') is True and re.fullmatch(
+                r'[a-fA-F0-9]{64}',str(prior.get('sourceSha') or '')):
+            print('  [GUARD26 REPAIR SKIPPED] Validated Guards source/index already published',flush=True)
+            return True
+    except Exception as exc:
+        print('  [GUARD26 CHECK] '+type(exc).__name__+': '+str(exc).splitlines()[0][:100],flush=True)
     cfg=load_config()
     url=str(cfg.get('guards_url') or '')
     if not url:raise RuntimeError('No Guards SharePoint source configured')
