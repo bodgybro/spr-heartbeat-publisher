@@ -116,7 +116,7 @@ def apply(path):
     lines=src.splitlines(keepends=True)
     start_positions=[n.lineno-1 for n in tree.body if isinstance(n,ast.If) and '__name__' in (ast.get_source_segment(src,n.test) or '')]
     if not start_positions:raise RuntimeError('Main boundary not found')
-    at=start_positions[-1]
+    at=start_positions[0]
     updated=''.join(lines[:at])+EXTENSION+'\n'+''.join(lines[at:])
     # Every wrapper must forward include_rosters to a base function that accepts it.
     # The older Cloudflare patch can change the roster body without changing its
