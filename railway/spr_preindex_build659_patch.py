@@ -53,7 +53,23 @@ def _spr_publish_index(job,page,cfg):
         except Exception as exc:
             print(f'  [INDEX META CHECK] {date} {role}: {exc}',flush=True)
         pending.append(target)
-    if not pending:return
+    if not pending:
+        # An unchanged primary index may still need to be seeded to the mirror.
+        secondary_current=False
+        for base in ('https://www.kustomvinyls.com/sps','https://kustomvinyls.com/sps'):
+            try:
+                reply=requests.get(base+'/spr-index-api.php',
+                    params={'action':'meta','date':date,'role':role},
+                    timeout=(6,15),allow_redirects=False)
+                info=reply.json() if reply.status_code==200 else {}
+                if (info.get('sourceSha')==sha and info.get('parserBuild')==658
+                    and info.get('pageLayoutBuild')==595):
+                    secondary_current=True
+                    break
+            except Exception:pass
+        if secondary_current:
+            print(f'  [INDEXES CURRENT] {date} {role}: primary and secondary',flush=True)
+            return
     page.goto(targets[0].rstrip('/')+'/',wait_until='domcontentloaded',timeout=60000)
     try:
         page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === "function"',timeout=25000)
@@ -152,6 +168,55 @@ def run_update(site, *args, **kwargs):
             _SPR_INDEX_QUEUE.clear()
         if jobs:
             threading.Thread(target=_spr_index_background,args=(jobs,),daemon=True,name='spr-preindex').start()
+
+def _spr_secondary_catchup():
+    """Rebuild missing indexes for the latest published date after a restart."""
+    try:
+        import datetime
+        from zoneinfo import ZoneInfo
+        from playwright.sync_api import sync_playwright
+        time.sleep(25)
+        if not _SPR_INDEX_RUNNING.acquire(blocking=False):
+            print('  [SECONDARY INDEX CATCHUP] Already indexing; skipped',flush=True)
+            return
+        try:
+            cfg=load_config()
+            today=datetime.datetime.now(ZoneInfo('Australia/Sydney')).date()
+            chosen=[]
+            # Locate the newest published SPR indexes. No PDF data leaves the two sites.
+            for offset in range(4):
+                day=today-datetime.timedelta(days=offset)
+                date=day.strftime('%Y-%m-%d')
+                for role in ('driver','guard'):
+                    try:
+                        response=requests.get('https://www.bodgybros.com/sps/spr-index-api.php',
+                            params={'action':'meta','date':date,'role':role},
+                            timeout=(8,20),allow_redirects=False)
+                        info=response.json() if response.status_code==200 else {}
+                        sha=info.get('sourceSha','')
+                        if isinstance(sha,str) and re.fullmatch('[0-9a-fA-F]{64}',sha):
+                            chosen.append({'date':date,'role':role,'sha':sha,'site':'https://www.bodgybros.com/sps'})
+                    except Exception as exc:
+                        print(f'  [SECONDARY INDEX META] {date} {role}: {exc}',flush=True)
+                if chosen:break
+            if not chosen:
+                print('  [SECONDARY INDEX CATCHUP] No recent indexed source PDFs; next SPR update will build indexes',flush=True)
+                return
+            print(f"  [SECONDARY INDEX CATCHUP] Checking {len(chosen)} indexes on {chosen[0]['date']}",flush=True)
+            with sync_playwright() as playwright:
+                browser=playwright.chromium.launch(headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+                try:
+                    page=browser.new_page(ignore_https_errors=True)
+                    for job in chosen:
+                        try:_spr_publish_index(job,page,cfg)
+                        except Exception as exc:
+                            print(f"  [SECONDARY INDEX CATCHUP FAILED] {job['date']} {job['role']}: {exc}",flush=True)
+                finally:browser.close()
+        finally:_SPR_INDEX_RUNNING.release()
+    except Exception as exc:
+        print('  [SECONDARY INDEX CATCHUP ERROR]',exc,flush=True)
+
+threading.Thread(target=_spr_secondary_catchup,daemon=True,name='spr-secondary-index-catchup').start()
 '''
 def apply(path):
     source=path.read_text(encoding='utf-8')
