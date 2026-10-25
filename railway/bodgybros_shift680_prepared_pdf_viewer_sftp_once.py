@@ -36,7 +36,10 @@ async function getPreparedShiftManifest(){
       }finally{clearTimeout(timer)}
     })().catch(error=>{console.debug('Prepared shift cache unavailable',error);return null});
   }
-  return shiftCacheManifestPromise;
+  const manifest=await shiftCacheManifestPromise;
+  // Keep checking while background extraction is building more shift PDFs.
+  if(!manifest||!manifest.complete)shiftCacheManifestPromise=null;
+  return manifest;
 }
 async function getPreparedShiftPdf(shift){
   const manifest=await getPreparedShiftManifest();
@@ -64,7 +67,7 @@ def patch(js):
     if js.count(anchor)!=1 or js.count(old)!=1:
         raise RuntimeError('Unexpected Shift handler anchor; no overwrite')
     js=MARKER+'\n'+js.replace(anchor,HELPER+'\n'+anchor,1).replace(old,new,1)
-    if js.count('getPreparedShiftPdf(shift)')!=1:
+    if js.count('const prepared=await getPreparedShiftPdf(shift);')!=1:
         raise RuntimeError('Prepared shift URL call unexpectedly duplicated')
     return js,True
 
