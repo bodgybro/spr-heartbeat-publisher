@@ -102,6 +102,202 @@ def _spr_verify_update_chain():
             raise RuntimeError(f'SPR updater keyword test failed at {label}: {exc}') from exc
     print('  [SPR UPDATE ARGUMENT TEST PASSED] manual and scheduled SPR-only calls accept include_rosters=False',flush=True)
 _spr_verify_update_chain()
+
+# SPR_DUAL_LOCAL_PUBLISH_670
+import hashlib as _dual_hashlib
+_DUAL_HOSTS={
+ 'bodgybros':('https://www.bodgybros.com/sps','https://bodgybros.com/sps'),
+ 'kustomvinyls':('https://www.kustomvinyls.com/sps','https://kustomvinyls.com/sps'),
+}
+_DUAL_HOST_CACHE={}
+_DUAL_ROSTER_OK={k:set() for k in _DUAL_HOSTS}
+_DUAL_ROSTER_ERRORS={k:[] for k in _DUAL_HOSTS}
+_DUAL_ORIG_ROSTER_SYNC=sync_all_rosters_online
+
+def _dual_host(label,api,params):
+    urls=list(_DUAL_HOSTS[label])
+    previous=_DUAL_HOST_CACHE.get(label)
+    if previous in urls:urls.remove(previous);urls.insert(0,previous)
+    failures=[]
+    for base in urls:
+        try:
+            r=requests.get(base+'/'+api,params=params,timeout=(6,15),allow_redirects=False)
+            try: body=r.json()
+            except ValueError:body={}
+            if r.status_code in (200,404) and isinstance(body,dict) and 'ok' in body:
+                _DUAL_HOST_CACHE[label]=base
+                return base,body
+            failures.append(f'{base}: HTTP {r.status_code}')
+        except Exception as e:failures.append(f'{base}: {str(e)[:100]}')
+    raise RuntimeError(f'{label} endpoint missing or offline: '+ '; '.join(failures))
+
+def upload_pdf(site,role,pdf,cfg,page=None):
+    """Check and publish one downloaded SPR PDF independently on both sites."""
+    import math
+    name=Path(pdf).name
+    match=re.fullmatch(r'All (Drivers|Guards) Combined (\d\d)_(\d\d)_(20\d\d)\.pdf',name,re.I)
+    if not match or role not in ('drivers','guards'):
+        raise RuntimeError('SPR name/role mismatch: '+name)
+    date=f'{match[4]}-{match[3]}-{match[2]}'
+    index_role='driver' if role=='drivers' else 'guard'
+    sha=_dual_hashlib.sha256(Path(pdf).read_bytes()).hexdigest()
+    size=Path(pdf).stat().st_size
+    errors=[];result={}
+    with _SPR_INDEX_LOCK:
+        _SPR_INDEX_QUEUE[(date,index_role)]={'date':date,'role':index_role,'sha':sha,
+            'site':'https://www.bodgybros.com/sps'}
+    for label in _DUAL_HOSTS:
+        try:
+            params={'action':'meta','date':date,'role':index_role}
+            if label=='bodgybros':
+                try:base,meta=_dual_host(label,'spr-dual-publish-api.php',params)
+                except Exception as e:
+                    base='https://www.bodgybros.com/sps';meta={}
+                    print('  [PRIMARY SPR META UNAVAILABLE] '+str(e)[:150],flush=True)
+            else:base,meta=_dual_host(label,'spr-dual-publish-api.php',params)
+            if meta.get('sha256')==sha and meta.get('size')==size:
+                result[label]='unchanged'
+                print(f'  [SPR VERIFIED UNCHANGED] {label} {date} {index_role}',flush=True)
+                continue
+            if label=='bodgybros':
+                try:_spr_upload_over_sftp(role,pdf)
+                except Exception as e:
+                    print('  [SPR SFTP FALLBACK] '+str(e)[:120],flush=True)
+                    _spr_upload_over_cpanel(role,pdf)
+            else:
+                count=max(1,math.ceil(size/(1024*1024)))
+                with Path(pdf).open('rb') as source:
+                    for i in range(count):
+                        chunk=source.read(1024*1024)
+                        for attempt in range(3):
+                            try:
+                                r=requests.post(base+'/spr-dual-publish-api.php',
+                                    params={'action':'upload-chunk','date':date,'role':index_role},
+                                    headers=_cloud_worker_headers(cfg),
+                                    data={'sha256':sha,'index':str(i),'total':str(count)},
+                                    files={'chunk':('chunk.bin',chunk,'application/octet-stream')},
+                                    timeout=(10,90),allow_redirects=False)
+                                try:j=r.json()
+                                except ValueError:j={}
+                                if not r.ok or not j.get('ok'):
+                                    raise RuntimeError(f'HTTP {r.status_code} '+str(j.get('error') or r.text[:120]))
+                                if i==count-1 and (j.get('sha256')!=sha or j.get('size')!=size):
+                                    raise RuntimeError('SPR final size or checksum mismatch')
+                                break
+                            except Exception:
+                                if attempt==2:raise
+                                time.sleep(attempt+2)
+            # Verify the secondary PDF is now stored locally, not proxied.
+            if label=='kustomvinyls':
+                r=requests.get(base+'/spr-dual-publish-api.php',
+                    params=params,timeout=(6,25),allow_redirects=False)
+                j=r.json() if r.status_code==200 else {}
+                if j.get('sha256')!=sha or j.get('size')!=size:
+                    raise RuntimeError('Post-upload local SPR verification failed')
+            result[label]='uploaded'
+            print(f'  [SPR STORED] {label} {date} {index_role}: {size} bytes',flush=True)
+        except Exception as e:
+            errors.append(label+': '+str(e)[:260])
+            print('  [SPR PUBLISH FAILED] '+errors[-1],flush=True)
+    if errors:raise RuntimeError('SPR copies incomplete: '+' | '.join(errors))
+    return result
+
+def upload_cached_roster_pdf(url,name,data,cache_path=''):
+    """One SharePoint download; independent checksum-checked uploads to both stores."""
+    import math
+    if not data.startswith(b'%PDF'):raise RuntimeError('Downloaded roster is not PDF: '+name)
+    sha=_dual_hashlib.sha256(data).hexdigest()
+    success=0
+    for label in _DUAL_HOSTS:
+        try:
+            base,_=_dual_host(label,'roster-cache-api.php',{'action':'health'})
+            endpoint=base+'/roster-cache-api.php'
+            headers=_cache_headers()
+            r=requests.get(endpoint,params={'action':'worker-check','url':url,'cache_path':cache_path},
+                headers=headers,timeout=(8,20),allow_redirects=False)
+            try:check=r.json()
+            except ValueError:check={}
+            if r.status_code==200 and check.get('sha256')==sha and check.get('size')==len(data):
+                print(f'    [ROSTER VERIFIED UNCHANGED] {label} {cache_path}',flush=True)
+            else:
+                if r.status_code not in (200,404):
+                    raise RuntimeError('Roster check failed HTTP '+str(r.status_code))
+                chunk_size=1024*1024
+                count=max(1,math.ceil(len(data)/chunk_size))
+                for i in range(count):
+                    part=data[i*chunk_size:(i+1)*chunk_size]
+                    for attempt in range(3):
+                        try:
+                            reply=requests.post(endpoint,params={'action':'worker-upload'},
+                                headers=headers,data={'url':url,'filename':name,
+                                'cache_path':cache_path,'index':str(i),'total':str(count)},
+                                files={'chunk':('chunk.bin',part,'application/octet-stream')},
+                                timeout=(10,50),allow_redirects=False)
+                            try:j=reply.json()
+                            except ValueError:j={}
+                            if not reply.ok or not j.get('ok'):
+                                raise RuntimeError('Roster chunk HTTP '+str(reply.status_code)+': '+str(j.get('error') or reply.text[:90]))
+                            if i==count-1 and (j.get('sha256')!=sha or j.get('bytes')!=len(data)):
+                                raise RuntimeError('Roster final checksum or length mismatch')
+                            break
+                        except Exception:
+                            if attempt==2:raise
+                            time.sleep(attempt+2)
+                print(f'    [ROSTER STORED] {label} {cache_path}',flush=True)
+            _DUAL_ROSTER_OK[label].add(url)
+            success+=1
+        except Exception as e:
+            err=name+': '+str(e)[:200]
+            _DUAL_ROSTER_ERRORS[label].append(err)
+            print(f'    [ROSTER SITE FAILED] {label}: {err}',flush=True)
+    if not success:raise RuntimeError('Both roster destinations failed: '+name)
+    return {'ok':True,'sites':success}
+
+def publish_roster_manifest(root_url,entries):
+    """Publish separate manifests only after each host has every expected PDF."""
+    depots=[e for e in entries if e.get('kind')=='folder' and e.get('parent_url')==root_url]
+    pdfs=[e for e in entries if e.get('kind')=='pdf']
+    if not depots or len(pdfs)!=len(depots)*6:
+        raise RuntimeError(f'Incomplete roster source: {len(pdfs)} PDFs for {len(depots)} depots; expected six per depot. Old manifests retained.')
+    expected={e['url'] for e in pdfs}
+    errors=[];done={}
+    for label in _DUAL_HOSTS:
+        missing=expected-_DUAL_ROSTER_OK[label]
+        if missing or _DUAL_ROSTER_ERRORS[label]:
+            errors.append(f'{label}: {len(missing)} missing PDFs, {len(_DUAL_ROSTER_ERRORS[label])} errors')
+            continue
+        try:
+            base,_=_dual_host(label,'roster-cache-api.php',{'action':'health'})
+            endpoint=base+'/roster-cache-api.php'
+            r=requests.post(endpoint,params={'action':'worker-manifest'},
+                headers={**_cache_headers(),'Content-Type':'application/json'},
+                data=json.dumps({'root':root_url,'generated':int(time.time()),'entries':entries}),
+                timeout=(10,110),allow_redirects=False)
+            j=r.json() if r.status_code==200 else {}
+            if not r.ok or not j.get('ok') or j.get('entries')!=len(entries):
+                raise RuntimeError('Manifest HTTP '+str(r.status_code)+': '+str(j.get('error') or r.text[:130]))
+            verify=requests.get(endpoint,params={'action':'root'},timeout=(6,30),allow_redirects=False)
+            proof=verify.json() if verify.status_code==200 else {}
+            if proof.get('url')!=root_url or len(proof.get('items',[]))!=len(depots):
+                raise RuntimeError('Local roster manifest verification failed')
+            done[label]=j
+            print(f'  [ROSTER MANIFEST VERIFIED] {label}: {len(pdfs)} PDFs',flush=True)
+        except Exception as e:errors.append(label+': '+str(e)[:180])
+    if errors:raise RuntimeError('Incomplete independent roster stores: '+' | '.join(errors))
+    return done
+
+def sync_all_rosters_online():
+    for key in _DUAL_HOSTS:
+        _DUAL_ROSTER_OK[key].clear()
+        _DUAL_ROSTER_ERRORS[key].clear()
+    return _DUAL_ORIG_ROSTER_SYNC()
+
+# The cross-site HTTP pull is obsolete. Kustom receives its own direct bytes.
+def _spr_mirror_secondary_worker(jobs):
+    print('  [CROSS-SITE PULL DISABLED] Both domains use independently uploaded SPR files',flush=True)
+
+print('  [DUAL INDEPENDENT STORES READY] SPR and roster uploads target both websites',flush=True)
+
 '''
 def apply(path):
     src=path.read_text(encoding='utf-8')
