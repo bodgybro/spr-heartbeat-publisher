@@ -188,7 +188,7 @@ def upload_pdf(site,role,pdf,cfg,page=None):
                                 if attempt==2:raise
                                 time.sleep(attempt+2)
             # Verify the secondary PDF is now stored locally, not proxied.
-            if label=='kustomvinyls':
+            if label in _DUAL_HOSTS:
                 r=requests.get(base+'/spr-dual-publish-api.php',
                     params=params,timeout=(6,25),allow_redirects=False)
                 j=r.json() if r.status_code==200 else {}
