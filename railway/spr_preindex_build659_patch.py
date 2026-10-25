@@ -198,6 +198,9 @@ def _spr_publish_index(job,page,cfg):
     failures=[]
     for target in pending:
         try:
+            if 'bodgybros.com' in target.lower():
+                _spr_publish_index_primary_sftp(date,role,sha,compressed)
+                continue
             response=requests.post(target.rstrip('/')+'/spr-index-api.php',
                 params={'action':'publish','date':date,'role':role},
                 data=compressed,headers=headers,timeout=(10,180))
