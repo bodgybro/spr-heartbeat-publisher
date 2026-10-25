@@ -243,14 +243,11 @@ def apply(path):
     lines=source.splitlines(keepends=True)
     candidates=[n.lineno-1 for n in tree.body if isinstance(n,ast.If) and '__name__' in ast.get_source_segment(source,n.test)]
     if not candidates:raise RuntimeError('Updater main boundary missing')
-    # Insert BEFORE the actual server.serve_forever startup guard. Earlier
-    # compatibility patches can add other __name__ checks elsewhere.
-    startup_guards=[n for n in tree.body if isinstance(n,ast.If) and
-        '__name__' in (ast.get_source_segment(source,n.test) or '') and
-        'serve_forever' in (ast.get_source_segment(source,n) or '')]
-    if len(startup_guards)!=1:
-        raise RuntimeError('Cannot locate the unique updater server entrypoint safely')
-    at=startup_guards[0].lineno-1
+    # Install directly after the original run_update body, before its caller.
+    # A preceding 'serve_forever' elsewhere in the module must not hide it.
+    run_nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='run_update']
+    if not run_nodes:raise RuntimeError('Updater run_update function not found')
+    at=run_nodes[-1].end_lineno
     updated=''.join(lines[:at])+EXTENSION+'\n'+''.join(lines[at:])
     compile(updated,str(path),'exec')
     path.write_text(updated,encoding='utf-8')
