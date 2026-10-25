@@ -185,11 +185,15 @@ def _x_shift_job(date,role):
                     hashed=_x_path.join(out_dir,shift+'-'+expected+'.pdf')
                     if shift in already_done:
                         try:
+                            if sftp.stat(hashed).st_size>500:
+                                count+=1
+                                if count==1 or count%30==0:
+                                    print(f'  [SHIFT PDF CACHE RESUMED] {date} {role} {count}/{len(shift_map)}',flush=True)
+                                continue
+                        except FileNotFoundError:pass
+                        try:
                             if sftp.stat(target).st_size>500:
-                                try:
-                                    sftp.stat(hashed)
-                                except FileNotFoundError:
-                                    _x_write_verified(sftp,hashed,_x_read_remote(sftp,target))
+                                _x_write_verified(sftp,hashed,_x_read_remote(sftp,target))
                                 count+=1
                                 if count==1 or count%30==0:
                                     print(f'  [SHIFT PDF CACHE RESUMED] {date} {role} {count}/{len(shift_map)}',flush=True)
