@@ -222,6 +222,142 @@ def _spr686_read_guard_meta(day):
             with ftp.open(remote,'rb') as f:return json.loads(f.read(65536))
     finally:ssh.close()
 
+
+def _spr686_direct_guard26():
+    """Try the actual SharePoint subweb API and exact paths for one date."""
+    from playwright.sync_api import sync_playwright
+    from urllib.parse import urlparse,parse_qs,unquote,quote
+    import tempfile,hashlib,posixpath
+    from datetime import date
+    target=date(2026,10,26)
+    cfg=load_config()
+    url=str(cfg.get('guards_url') or '')
+    if not url:raise RuntimeError('No Guards SharePoint source configured')
+    parsed=urlparse(url)
+    origin=parsed.scheme+'://'+parsed.netloc
+    guard_root=unquote((parse_qs(parsed.query).get('RootFolder') or [''])[0]).rstrip('/')
+    if not guard_root.lower().endswith('/guards'):
+        raise RuntimeError('Incorrect configured Guards root')
+    parent=unquote(parsed.path)
+    site_root=parent.split('/Shared Documents_1/')[0]
+    if not site_root or site_root==parent:
+        raise RuntimeError('SharePoint subweb path could not be determined')
+    site_apis=[origin+quote(site_root,safe='/')+'/_api/web',
+               origin+'/sites/ST-SPS-SD/_api/web']
+    dayfolders=[]
+    # Prefer exact parent folder metadata returned by the SharePoint subweb,
+    # but probe known date formats if the library view is virtualized.
+    for datepart in ('26-10-2026','26_10_2026','26.10.2026'):
+        dayfolders.append(guard_root+'/'+datepart)
+    pdfpaths=[]
+    seen=set()
+    def add_pdf(p):
+        p=unquote(str(p or ''))
+        if p in seen or not p.lower().endswith('.pdf'):return
+        if not p.lower().startswith(guard_root.lower()+'/'):return
+        if not sharepoint_combined_pdf_matches(posixpath.basename(p),p,'All Guards Combined',target):return
+        if not any(p.lower().startswith(f.lower()+'/') for f in dayfolders):return
+        seen.add(p);pdfpaths.append(p)
+    with SHAREPOINT_BROWSE_LOCK, sync_playwright() as pw:
+        context=_launch_sharepoint_context(pw,cfg,
+            headless=str(os.environ.get('SPR_HEADLESS','0')).lower() in ('1','true','yes','on'),
+            ignore_https_errors=True,accept_downloads=True,
+            args=['--window-size=640,480','--window-position=20,20'],no_viewport=True)
+        try:
+            page=context.pages[0] if context.pages else context.new_page()
+            page.goto(url,wait_until='domcontentloaded',timeout=120000)
+            if not _sharepoint_session_ready(page):
+                _wait_for_sharepoint_signin(page,timeout_seconds=120)
+            def rest_items(api_root,folder,kind):
+                escaped=folder.replace("'","''")
+                endpoint=(api_root+"/GetFolderByServerRelativePath(decodedUrl='"+
+                    quote(escaped,safe="/-._~")+
+                    "')/"+kind+"?$select=Name,ServerRelativeUrl&$top=5000")
+                resp=context.request.get(endpoint,headers={'Accept':'application/json;odata=nometadata'},timeout=35000)
+                if not resp.ok:
+                    print('  [GUARD26 SHAREPOINT API] HTTP '+str(resp.status)+' '+kind,flush=True)
+                    return []
+                data=resp.json()
+                return data.get('value') or data.get('d',{}).get('results') or []
+            for api in site_apis:
+                try:
+                    children=rest_items(api,guard_root,'Folders')
+                    print('  [GUARD26 SHAREPOINT FOLDERS] '+str(len(children)),flush=True)
+                    for obj in children:
+                        p=unquote(str(obj.get('ServerRelativeUrl') or ''))
+                        if p.lower().startswith(guard_root.lower()+'/') and date_from_name(posixpath.basename(p))==target and p not in dayfolders:
+                            dayfolders.insert(0,p)
+                except Exception as exc:
+                    print('  [GUARD26 SHAREPOINT FOLDERS ERROR] '+str(exc).splitlines()[0][:140],flush=True)
+                for folder in dayfolders:
+                    try:
+                        files=rest_items(api,folder,'Files')
+                        print('  [GUARD26 SHAREPOINT FILES] '+str(len(files)),flush=True)
+                        for item in files:add_pdf(item.get('ServerRelativeUrl'))
+                    except Exception as exc:
+                        print('  [GUARD26 SHAREPOINT FILES ERROR] '+str(exc).splitlines()[0][:110],flush=True)
+            for folder in dayfolders:
+                for filename in ('All Guards Combined 26_10_2026.pdf',
+                                 'All Guards Combined 26-10-2026.pdf',
+                                 'All Guards Combined 26.10.2026.pdf'):
+                    add_pdf(folder+'/'+filename)
+            print('  [GUARD26 EXACT-PATH CANDIDATES] '+str(len(pdfpaths)),flush=True)
+            from pathlib import Path
+            with tempfile.TemporaryDirectory(prefix='guard26-') as tmp:
+                temp=Path(tmp)
+                source=None;sha=None
+                for i,path in enumerate(pdfpaths):
+                    endpoints=[origin+quote(path,safe='/')]
+                    for api in site_apis:
+                        endpoints.append(api+"/GetFileByServerRelativePath(decodedUrl='"+
+                            quote(path.replace("'","''"),safe="/-._~")+
+                            "')/$value")
+                    for ep in endpoints:
+                        try:
+                            response=context.request.get(ep,timeout=45000)
+                            if not response.ok:continue
+                            payload=response.body()
+                            if not payload.startswith(b'%PDF') or len(payload)<50000:continue
+                            candidate=temp/('candidate'+str(i)+'.pdf')
+                            candidate.write_bytes(payload)
+                            _spr686_check_pdf_role(candidate,'guards')
+                            source=candidate
+                            sha=hashlib.sha256(payload).hexdigest()
+                            break
+                        except Exception as exc:
+                            print('  [GUARD26 REJECTED PDF] '+type(exc).__name__+': '+str(exc).splitlines()[0][:140],flush=True)
+                    if source:break
+                if source is None:
+                    print('  [GUARD26 DIRECT SOURCE NOT FOUND] No correctly headed PDF; existing file preserved',flush=True)
+                    return False
+                final=temp/'All Guards Combined 26_10_2026.pdf'
+                source.replace(final)
+                upload_pdf('https://www.bodgybros.com/sps','guards',final,cfg,page)
+                print('  [GUARD26 UPLOADED] 26 October correct original Guards PDF verified by SFTP',flush=True)
+        finally:
+            context.close()
+            _wait_for_sharepoint_profile_release(6)
+    if sha:
+        print('  [GUARD26 REINDEX] 2026-10-26 guard only',flush=True)
+        _spr_index_background([{'date':'2026-10-26','role':'guard','sha':sha,
+            'site':'https://www.bodgybros.com/sps'}])
+        if _spr_primary_index_current('2026-10-26','guard',sha):
+            print('  [GUARD26 COMPLETE] Source and index confirmed',flush=True)
+        else:
+            print('  [GUARD26 INDEX NOT VERIFIED] Source repaired, search index pending',flush=True)
+        return True
+    return False
+
+_spr686_old_repair_today_guards=_spr686_repair_today_guards
+def _spr686_repair_today_guards():
+    try:
+        if _spr686_direct_guard26():return
+    except Exception as exc:
+        print('  [GUARD26 DIRECT LOOKUP FAILED] '+type(exc).__name__+': '+str(exc).splitlines()[0][:170],flush=True)
+    # Keep the existing guarded SharePoint browser workflow as fallback;
+    # it also refuses Driver PDFs and never overwrites on failure.
+    return _spr686_old_repair_today_guards()
+
 def _spr686_guard_worker():
     try:_spr686_repair_today_guards()
     except Exception as exc:
