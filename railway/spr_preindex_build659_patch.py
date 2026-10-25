@@ -157,7 +157,7 @@ def _spr_publish_index(job,page,cfg):
             try:
                 reply=requests.get(base+'/spr-index-api.php',
                     params={'action':'meta','date':date,'role':role},
-                    timeout=(6,15),allow_redirects=False)
+                    timeout=(6,15),allow_redirects=False,verify=False)
                 info=reply.json() if reply.status_code==200 else {}
                 if (info.get('sourceSha')==sha and info.get('parserBuild')==658
                     and info.get('pageLayoutBuild')==595):
@@ -219,7 +219,7 @@ def _spr_publish_index(job,page,cfg):
             try:
                 meta=requests.get(endpoint,
                     params={'action':'meta','date':date,'role':role},
-                    timeout=(8,20),allow_redirects=False)
+                    timeout=(8,20),allow_redirects=False,verify=False)
                 if meta.status_code in (301,302,303,307,308):
                     raise RuntimeError('redirected index endpoint')
                 if meta.status_code==404:
@@ -236,7 +236,7 @@ def _spr_publish_index(job,page,cfg):
                 posted=requests.post(endpoint,
                     params={'action':'publish','date':date,'role':role},
                     data=compressed,headers=headers,timeout=(10,180),
-                    allow_redirects=False)
+                    allow_redirects=False,verify=False)
                 try:result=posted.json()
                 except ValueError:result={}
                 if posted.status_code!=200 or result.get('ok') is not True:
