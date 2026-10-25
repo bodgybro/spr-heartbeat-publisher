@@ -1,6 +1,6 @@
 SPR SEARCH RC1 — FAST LOAD + DEPLOYMENT PATHS
 ===============================================
-Stable baseline: RC1, renamed from user-tested live Build 687 (26 Oct 2026).
+RC1 is the NAME OF THE BACKUP ONLY. Live website remains Build 687 (26 Oct 2026).
 Primary website: https://www.bodgybros.com/sps/
 Web root: public_html/sps/
 Site backup: public_html/sps/SPR-Search-RC1-Bodgybros.zip
@@ -83,8 +83,8 @@ Production environment; Bodgybros is the primary publishing target.
    Railway 'SUCCESS' state alone is not proof of live file deployment.
 7. REMOVE the one-time script from startup after confirmed upload.
    Leaving it in place caused later Railway restarts to fail.
-8. Update versioned script.js?v=... reference and displayed build label
-   together, so mobile browsers do not reuse outdated JavaScript.
+8. When deploying a FUTURE new build, update script.js?v=... and its displayed
+   build label together. CREATING RC1 BACKUP MUST NOT CHANGE THE LIVE LABEL.
 9. Deployment ZIP has files directly at root, NO app/ duplicate and
    NO wrapper directory. Only include application files + this note.
    Never include live SPR PDFs, indexed data, rosters, .env,
@@ -92,7 +92,7 @@ Production environment; Bodgybros is the primary publishing target.
 
 POST-DEPLOY REGRESSION TESTS
 ----------------------------
-- RC1 label shows at /sps/ on mobile and desktop after refresh.
+- Build 687 remains visible at /sps/ after creating the RC1 backup.
 - Fresh date/role Load and a repeated cached Load are both fast.
 - Drivers -> Guards -> Drivers correctly separates all results.
 - Guards 26/10 run 197A finds Guard data, not Drivers.
@@ -106,9 +106,15 @@ POST-DEPLOY REGRESSION TESTS
 
 RC1 RECOVERY ARCHIVE
 --------------------
-SPR-Search-RC1-Bodgybros.zip is a snapshot of the ACTUAL live
-application files at RC1, with paths.txt and SHA256SUMS.json inside.
+SPR-Search-RC1-Bodgybros.zip is intended to be an exact BACKUP of the
+CURRENT live Build 687 application files, with paths.txt and SHA256SUMS.json.
+Do not claim it is exact unless current SFTP bytes/hashes were verified.
 The ZIP is deliberately not a dump of server data or credentials.
 Extract it directly into public_html/sps to restore the frontend.
 Do not delete/overwrite existing SPR PDF, indices, roster, or
 private configuration directories when restoring.
+
+IMPORTANT: RC1 IS BACKUP-ONLY. Never change index.php, index.html, script.js,
+version labels, live PDF/index files, Railway schedule or stored rosters
+when taking the backup. A public URL must not expose credentials or
+confidential PDFs/rosters. Store complete private backups outside the web root.
