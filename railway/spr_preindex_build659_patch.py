@@ -83,7 +83,7 @@ def _spr_publish_index(job,page,cfg):
                 raise RuntimeError(f'HTTP {response.status_code}: {response.text[:200]}')
             print(f'  [INDEX PUBLISHED] {date} {role} {target}',flush=True)
         except Exception as exc:failures.append(f'{target}: {exc}')
-if failures:raise RuntimeError(' | '.join(failures))
+    if failures:raise RuntimeError(' | '.join(failures))
     # Publish the exact same pre-built index to the secondary mirror.
     # Independent retries protect Bodgybros performance and completion reporting.
     secondary_bases=('https://www.kustomvinyls.com/sps','https://kustomvinyls.com/sps')
