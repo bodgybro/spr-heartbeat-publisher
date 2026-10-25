@@ -184,11 +184,19 @@ def _x_shift_job(date,role):
                     target=_x_path.join(out_dir,shift+'.pdf')
                     _x_write_verified(sftp,target,data)
                     count+=1
-                    if count==1 or count%50==0:
+                    if count==1 or count%30==0:
+                        ready=priority[:count]
+                        # Publish an SHA-bound PARTIAL manifest, so already
+                        # prepared shifts open instantly while others extract.
+                        partial=json.dumps({'version':680,'date':date,'role':role,
+                            'sourceSha':expected,'shifts':ready,
+                            'createdAt':int(time.time()),'count':count,
+                            'complete':False},separators=(',',':')).encode('utf-8')
+                        _x_write_verified(sftp,manifest_path,partial)
                         print(f'  [SHIFT PDFs PREPARED] {date} {role} {count}/{len(shift_map)}',flush=True)
                 final=json.dumps({'version':680,'date':date,'role':role,
                     'sourceSha':expected,'shifts':sorted(shift_map),
-                    'createdAt':int(time.time()),'count':len(shift_map)},
+                    'createdAt':int(time.time()),'count':len(shift_map),'complete':True},
                     separators=(',',':')).encode('utf-8')
                 _x_write_verified(sftp,manifest_path,final)
                 print(f'  [SHIFT PDF CACHE COMPLETE] {date} {role}: {count} original selectable shift PDFs',flush=True)
