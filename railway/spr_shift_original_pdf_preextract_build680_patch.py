@@ -157,9 +157,9 @@ def _x_shift_job(date,role):
             already_done=set()
             try:
                 old=json.loads(_x_read_remote(sftp,manifest_path).decode('utf-8'))
-                if old.get('sourceSha')==expected and old.get('version')==680:
+                if old.get('sourceSha')==expected and old.get('version') in (680,682):
                     already_done=set(old.get('shifts') or []).intersection(shift_map)
-                if (old.get('sourceSha')==expected and old.get('version')==680
+                if (old.get('sourceSha')==expected and old.get('version')==682
                     and len(old.get('shifts') or [])==len(shift_map)
                     and set(old.get('shifts') or [])==set(shift_map)):
                     print(f'  [SHIFT PDF CACHE CURRENT] {date} {role}: {len(shift_map)} extracted PDFs',flush=True)
@@ -182,9 +182,14 @@ def _x_shift_job(date,role):
                 for shift in priority:
                     pages=shift_map[shift]
                     target=_x_path.join(out_dir,shift+'.pdf')
+                    hashed=_x_path.join(out_dir,shift+'-'+expected+'.pdf')
                     if shift in already_done:
                         try:
                             if sftp.stat(target).st_size>500:
+                                try:
+                                    sftp.stat(hashed)
+                                except FileNotFoundError:
+                                    _x_write_verified(sftp,hashed,_x_read_remote(sftp,target))
                                 count+=1
                                 if count==1 or count%30==0:
                                     print(f'  [SHIFT PDF CACHE RESUMED] {date} {role} {count}/{len(shift_map)}',flush=True)
@@ -203,20 +208,21 @@ def _x_shift_job(date,role):
                         if check.page_count!=len(pages):
                             raise RuntimeError('Shift extraction page-count mismatch')
                     finally:check.close()
-                    target=_x_path.join(out_dir,shift+'.pdf')
-                    _x_write_verified(sftp,target,data)
+                    # Hash-keyed PDFs are self-validating; no .json or PHP
+                    # metadata HTTP request is needed for the Shift click.
+                    _x_write_verified(sftp,hashed,data)
                     count+=1
                     if count==1 or count%30==0:
                         ready=priority[:count]
                         # Publish an SHA-bound PARTIAL manifest, so already
                         # prepared shifts open instantly while others extract.
-                        partial=json.dumps({'version':680,'date':date,'role':role,
+                        partial=json.dumps({'version':682,'date':date,'role':role,
                             'sourceSha':expected,'shifts':ready,
                             'createdAt':int(time.time()),'count':count,
                             'complete':False},separators=(',',':')).encode('utf-8')
                         _x_write_verified(sftp,manifest_path,partial)
                         print(f'  [SHIFT PDFs PREPARED] {date} {role} {count}/{len(shift_map)}',flush=True)
-                final=json.dumps({'version':680,'date':date,'role':role,
+                final=json.dumps({'version':682,'date':date,'role':role,
                     'sourceSha':expected,'shifts':sorted(shift_map),
                     'createdAt':int(time.time()),'count':len(shift_map),'complete':True},
                     separators=(',',':')).encode('utf-8')
