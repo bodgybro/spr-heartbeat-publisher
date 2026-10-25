@@ -349,6 +349,11 @@ def apply(path):
     if not base_checked:
         raise RuntimeError('run_update signature validation failed: no base implementation accepts include_rosters')
     updated=''.join(updated_lines)
+    parsed_proof=ast.parse(updated)
+    live_main=[n.lineno for n in parsed_proof.body if isinstance(n,ast.If) and
+        '__name__' in (ast.get_source_segment(updated,n.test) or '') and
+        'serve_forever' in (ast.get_source_segment(updated,n) or '')]
+    print(f'  [DUAL INSTALL DIAGNOSTIC] insertion_at={at+1}; serve_main={live_main}; inserted_marker={updated.count("# SPR_DUAL_LOCAL_PUBLISH_670")}',flush=True)
     compile(updated,str(path),'exec')
     print(f'  [RUN_UPDATE VALIDATED] include_rosters forwarded; base signature repairs={repairs}',flush=True)
     path.write_text(updated,encoding='utf-8')
