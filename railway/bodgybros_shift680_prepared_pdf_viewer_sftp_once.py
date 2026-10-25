@@ -52,10 +52,17 @@ def patch(js):
     if 'extracted.copyPages(source,pages.map(page=>page-1))' not in js:
         raise RuntimeError('Existing original-page copyPages fallback missing')
     anchor='async function handleShiftSprClick(event){'
-    old='''  try{
-    // A failed PDF worker or remote range request must not leave a blank'''
+    start=js.find(anchor)
+    end=js.find('\nfunction collapseOtherTargetModules(',start)
+    if start<0 or end<=start or js.count(anchor)!=1:
+        raise RuntimeError('Unique shift-link handler boundary not found')
+    handler=js[start:end]
+    if ('viewer.location.replace' not in handler or
+        'prepareShiftPdfUrl(shift,' not in handler or
+        handler.count('  try{\n')!=1):
+        raise RuntimeError('Shift click fallback contract changed; refusing overwrite')
+    original='  try{\n'
     new='''  try{
-    // No browser-side 800-page parse: open the pre-extracted source PDF pages.
     const prepared=await getPreparedShiftPdf(shift);
     if(prepared){
       viewer.location.replace(new URL(prepared,document.baseURI).href+'#page=1&zoom=page-width');
@@ -63,9 +70,9 @@ def patch(js):
         ' for Shift '+shift+' from the prepared shift PDF.','success');
       return;
     }
-    // A failed PDF worker or remote range request must not leave a blank'''
-    if js.count(anchor)!=1 or js.count(old)!=1:
-        raise RuntimeError('Unexpected Shift handler anchor; no overwrite')
+'''
+    handler=handler.replace(original,new,1)
+    js=js[:start]+handler+js[end:]
     js=MARKER+'\n'+js.replace(anchor,HELPER+'\n'+anchor,1).replace(old,new,1)
     if js.count('const prepared=await getPreparedShiftPdf(shift);')!=1:
         raise RuntimeError('Prepared shift URL call unexpectedly duplicated')
