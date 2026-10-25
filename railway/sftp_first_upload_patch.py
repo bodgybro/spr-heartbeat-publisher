@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """SPR Online Updater: upload PDFs over SFTP, then cPanel UAPI fallback.
 
-Apply after existing Cloudflare/fast roster/schedule patches. Never falls
-back to ModSecurity-blocked spr-updater-api.php for bodgybros.com.
+Apply after existing Cloudflare, roster and schedule patches. Bodgybros PDFs
+are transferred and verified using SFTP, with direct cPanel UAPI fallback.
 """
 import ast
 from pathlib import Path
@@ -119,7 +119,7 @@ def _spr_upload_over_sftp(role, pdf):
     return {"ok":True,"method":"SFTP","filename":filename,"directory":remote_dir}
 
 def _spr_upload_over_cpanel(role, pdf):
-    """Direct cPanel port 2083, not the website PHP/ModSecurity endpoint."""
+    """Direct cPanel UAPI on port 2083; never the public website upload endpoint."""
     host=(os.environ.get("CPANEL_HOST") or "").strip()
     user=(os.environ.get("CPANEL_USERNAME") or "").strip()
     token=(os.environ.get("CPANEL_API_TOKEN") or "").strip()
