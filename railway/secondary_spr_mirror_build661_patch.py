@@ -114,6 +114,167 @@ _DUAL_ROSTER_OK={k:set() for k in _DUAL_HOSTS}
 _DUAL_ROSTER_ERRORS={k:[] for k in _DUAL_HOSTS}
 _DUAL_ORIG_ROSTER_SYNC=sync_all_rosters_online
 
+# Build 673: SFTP-only Kustom transport; physically independent website paths.
+_KUSTOM_ROSTER_PROOFS={}
+def _kustom_sftp_config():
+    import posixpath
+    required=('KUSTOM_SFTP_HOST','KUSTOM_SFTP_USERNAME',
+              'KUSTOM_SFTP_PRIVATE_KEY_B64','KUSTOM_SFTP_ROOT')
+    missing=[n for n in required if not os.environ.get(n,'').strip()]
+    if missing:raise RuntimeError('Configure Kustom SFTP in Railway: '+', '.join(missing))
+    host=os.environ['KUSTOM_SFTP_HOST'].strip()
+    username=os.environ['KUSTOM_SFTP_USERNAME'].strip()
+    root=posixpath.normpath(os.environ['KUSTOM_SFTP_ROOT'].strip().replace('\\','/'))
+    if not root.endswith('/sps') or root in ('sps','/sps'):
+        raise RuntimeError('KUSTOM_SFTP_ROOT must be the actual independent website /sps directory')
+    if (host.lower()==os.environ.get('SFTP_HOST','').strip().lower()
+        and username==os.environ.get('SFTP_USERNAME','').strip()
+        and root==posixpath.normpath(os.environ.get('SFTP_ROOT','').strip().replace('\\','/'))):
+        raise RuntimeError('Kustom SFTP root matches Bodgybros root; refusing to overwrite primary')
+    return host,username,root,int(os.environ.get('KUSTOM_SFTP_PORT') or 22)
+
+@__import__('contextlib').contextmanager
+def _kustom_sftp_open():
+    import paramiko,base64,io,stat
+    host,username,root,port=_kustom_sftp_config()
+    raw=os.environ['KUSTOM_SFTP_PRIVATE_KEY_B64'].strip()
+    try:decoded=base64.b64decode(raw,validate=True).decode('utf-8')
+    except Exception as exc:raise RuntimeError('Invalid base64 Kustom SFTP private key') from exc
+    key=None
+    for typ in (paramiko.Ed25519Key,paramiko.RSAKey,paramiko.ECDSAKey):
+        try:key=typ.from_private_key(io.StringIO(decoded));break
+        except Exception:pass
+    if key is None:raise RuntimeError('Unusable Kustom SFTP private key')
+    hosts=DATA_ROOT/'credentials'/'kustom-sftp-known-hosts'
+    hosts.parent.mkdir(parents=True,exist_ok=True)
+    if not hosts.exists():hosts.write_text('',encoding='ascii');os.chmod(hosts,0o600)
+    ssh=paramiko.SSHClient()
+    ssh.load_host_keys(str(hosts))
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    sftp=None
+    try:
+        ssh.connect(hostname=host,port=port,username=username,pkey=key,
+            timeout=10,banner_timeout=12,auth_timeout=12,
+            allow_agent=False,look_for_keys=False)
+        ssh.save_host_keys(str(hosts))
+        sftp=ssh.open_sftp()
+        sftp.get_channel().settimeout(120)
+        if not stat.S_ISDIR(sftp.stat(root).st_mode):
+            raise RuntimeError('Kustom /sps root is not a directory')
+        yield sftp,root
+    finally:
+        try:
+            if sftp is not None:sftp.close()
+        finally:ssh.close()
+
+def _kustom_sftp_hash(sftp,path):
+    import hashlib
+    digest=hashlib.sha256()
+    with sftp.open(path,'rb') as stream:
+        while True:
+            block=stream.read(1024*1024)
+            if not block:break
+            digest.update(block)
+    return digest.hexdigest()
+
+def _kustom_sftp_store(sftp,root,relative,data):
+    """Atomic replace after remote SHA-256 verification; leave old file on failure."""
+    import posixpath,hashlib,stat
+    if not isinstance(data,bytes) or not data or relative.startswith('/'):
+        raise RuntimeError('Invalid Kustom SFTP data/path')
+    parts=relative.split('/')
+    if any(x in ('.','..','') or '\\' in x for x in parts):
+        raise RuntimeError('Unsafe Kustom SFTP path')
+    parent=root
+    for dirname in parts[:-1]:
+        parent=posixpath.join(parent,dirname)
+        try:
+            if not stat.S_ISDIR(sftp.stat(parent).st_mode):
+                raise RuntimeError('Remote path is not a directory: '+parent)
+        except FileNotFoundError:sftp.mkdir(parent)
+    path=posixpath.join(root,relative)
+    sha=hashlib.sha256(data).hexdigest()
+    try:
+        if sftp.stat(path).st_size==len(data) and _kustom_sftp_hash(sftp,path)==sha:
+            return 'unchanged',sha
+    except FileNotFoundError:pass
+    temp=path+'.updating-'+str(os.getpid())+'-'+str(threading.get_ident())
+    try:
+        with sftp.open(temp,'wb') as dest:dest.write(data)
+        if sftp.stat(temp).st_size!=len(data) or _kustom_sftp_hash(sftp,temp)!=sha:
+            raise RuntimeError('Kustom SFTP upload checksum mismatch: '+relative)
+        sftp.posix_rename(temp,path)
+        if sftp.stat(path).st_size!=len(data):
+            raise RuntimeError('Kustom SFTP final size mismatch: '+relative)
+    finally:
+        try:sftp.remove(temp)
+        except Exception:pass
+    return 'uploaded',sha
+
+def _kustom_sftp_pdf(pdf,role,sha):
+    name=Path(pdf).name
+    relative='spr/'+('d' if role=='drivers' else 'g')+'/'+name
+    with _kustom_sftp_open() as (sftp,root):
+        status,remote_sha=_kustom_sftp_store(sftp,root,relative,Path(pdf).read_bytes())
+    if remote_sha!=sha:raise RuntimeError('Kustom PDF source hash mismatch')
+    print(f'  [KUSTOM SFTP PDF VERIFIED] {name}: {status} {sha[:12]}',flush=True)
+    return status
+
+def _kustom_sftp_roster(url,cache_path,data,sha):
+    import re
+    parts=str(cache_path).split('/')
+    if (len(parts)<4 or len(parts)>8 or not str(cache_path).lower().endswith('.pdf') or
+        any(p in ('','.','..') or not re.fullmatch(r'[A-Za-z0-9._ -]+',p) for p in parts)):
+        raise RuntimeError('Invalid roster destination for SFTP: '+str(cache_path)[:120])
+    with _kustom_sftp_open() as (sftp,root):
+        state,received=_kustom_sftp_store(sftp,root,'rosters/'+str(cache_path),data)
+    if received!=sha:raise RuntimeError('Kustom roster source hash mismatch')
+    _KUSTOM_ROSTER_PROOFS[url]=(cache_path,len(data))
+    print(f'    [KUSTOM SFTP ROSTER VERIFIED] {cache_path}: {state}',flush=True)
+
+def _kustom_sftp_manifest(root_url,entries):
+    import posixpath
+    with _kustom_sftp_open() as (sftp,root):
+        for e in entries:
+            if e.get('kind')!='pdf':continue
+            proof=_KUSTOM_ROSTER_PROOFS.get(e.get('url'))
+            if not proof or proof[0]!=e.get('cache_path'):
+                raise RuntimeError('Unverified Kustom roster PDF: '+str(e.get('name')))
+            if sftp.stat(posixpath.join(root,'rosters',proof[0])).st_size!=proof[1]:
+                raise RuntimeError('Missing Kustom roster before manifest: '+proof[0])
+        payload=json.dumps({'root':root_url,'generated':int(time.time()),'entries':entries},
+            ensure_ascii=False,separators=(',',':')).encode('utf-8')
+        state,sha=_kustom_sftp_store(sftp,root,'.roster-cache/manifest.json',payload)
+    print(f'  [KUSTOM SFTP ROSTER MANIFEST VERIFIED] {len(entries)} entries, {state} {sha[:12]}',flush=True)
+    return {'ok':True,'entries':len(entries)}
+
+def _kustom_sftp_index_matches(date,role,sha):
+    import posixpath
+    rel='spr/i/'+('d' if role=='driver' else 'g')+'/'+date
+    with _kustom_sftp_open() as (sftp,root):
+        try:
+            with sftp.open(posixpath.join(root,rel+'.meta.json'),'rb') as reader:
+                meta=json.loads(reader.read(200000).decode('utf-8'))
+            size=sftp.stat(posixpath.join(root,rel+'.json.gz')).st_size
+            return (meta.get('sourceSha')==sha and meta.get('parserBuild')==658
+                and meta.get('pageLayoutBuild')==595 and meta.get('compressedBytes')==size and size>0)
+        except FileNotFoundError:return False
+
+def _kustom_sftp_index_publish(date,role,sha,compressed):
+    import posixpath
+    name=('All Drivers Combined ' if role=='driver' else 'All Guards Combined ')+date[8:10]+'_'+date[5:7]+'_'+date[:4]+'.pdf'
+    relative='spr/i/'+('d' if role=='driver' else 'g')+'/'+date
+    with _kustom_sftp_open() as (sftp,root):
+        pdf=posixpath.join(root,'spr',('d' if role=='driver' else 'g'),name)
+        if _kustom_sftp_hash(sftp,pdf)!=sha:
+            raise RuntimeError('Kustom SFTP index source PDF SHA-256 mismatch')
+        state,index_hash=_kustom_sftp_store(sftp,root,relative+'.json.gz',compressed)
+        meta=json.dumps({'ok':True,'date':date,'role':role,'sourceSha':sha,
+            'parserBuild':658,'pageLayoutBuild':595,'updatedAt':int(time.time()),
+            'compressedBytes':len(compressed)},separators=(',',':')).encode('utf-8')
+        _kustom_sftp_store(sftp,root,relative+'.meta.json',meta)
+    print(f'  [KUSTOM SFTP INDEX VERIFIED] {date} {role}: {state} {index_hash[:12]}',flush=True)
+
 def _dual_tls_verify(label):
     # Explicit site-specific exception. Never disable verification globally.
     return label != 'kustomvinyls'
