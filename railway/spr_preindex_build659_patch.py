@@ -247,7 +247,7 @@ def apply(path):
     # A preceding 'serve_forever' elsewhere in the module must not hide it.
     run_nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='run_update']
     if not run_nodes:raise RuntimeError('Updater run_update function not found')
-    at=run_nodes[-1].end_lineno
+    at=run_nodes[0].end_lineno
     updated=''.join(lines[:at])+EXTENSION+'\n'+''.join(lines[at:])
     compile(updated,str(path),'exec')
     path.write_text(updated,encoding='utf-8')
