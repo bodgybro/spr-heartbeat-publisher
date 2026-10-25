@@ -48,7 +48,8 @@ def main():
               username=env['SFTP_USERNAME'],pkey=key,timeout=12,auth_timeout=12,
               banner_timeout=12,allow_agent=False,look_for_keys=False)
   with ssh.open_sftp() as sftp:
-   folder=posixpath.join(rootpath(env['SFTP_ROOT']),'releases')
+   publicroot=rootpath(env['SFTP_ROOT'])
+   folder=posixpath.join(publicroot,'releases')
    data=read(sftp,posixpath.join(folder,ARCHIVE))
    if not data.startswith(b'PK\x03\x04'):raise RuntimeError('Verified ZIP magic missing')
    with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -103,15 +104,15 @@ download.addEventListener("click", () => {
 <p><small>Archive size: '''+str(len(data))+''' bytes<br>SHA-256: <code>'''+package_sha+'''</code><br>
 Credentials, stored rosters and downloaded SPR PDFs are not included.</small></p>
 <script defer src="./'''+js_name+'''"></script></body></html>'''
-   write(sftp,posixpath.join(folder,js_name),js.encode('utf8'))
-   write(sftp,posixpath.join(folder,html_name),page.encode('utf8'))
+   write(sftp,posixpath.join(publicroot,js_name),js.encode('utf8'))
+   write(sftp,posixpath.join(publicroot,html_name),page.encode('utf8'))
    print('[684 ZIP DOWNLOAD PAGE UPLOADED] '+html_name+' JS bytes '+str(len(js))+' exact_zip_sha256 '+package_sha,flush=True)
  finally:ssh.close()
- link='https://www.bodgybros.com/sps/releases/'+html_name
- js_link='https://www.bodgybros.com/sps/releases/'+js_name
+ link='https://www.bodgybros.com/sps/'+html_name
+ js_link='https://www.bodgybros.com/sps/'+js_name
  for u in (link,js_link):
   try:
-   r=requests.get(u,timeout=(7,18),stream=True,allow_redirects=False)
+   r=requests.get(u,timeout=(7,18),stream=True,allow_redirects=False,headers={'User-Agent':'Mozilla/5.0'})
    first=next(r.iter_content(chunk_size=512),b'')
    print('[684 RELEASE PUBLIC TEST] '+('HTML' if u==link else 'JS')+' HTTP '+str(r.status_code)+' contentType '+str(r.headers.get('Content-Type'))+
      ' bytes '+str(r.headers.get('Content-Length'))+' bodyOk '+str((b'<!DOCTYPE html>' in first) if u==link else (b'"use strict"' in first)),flush=True)
