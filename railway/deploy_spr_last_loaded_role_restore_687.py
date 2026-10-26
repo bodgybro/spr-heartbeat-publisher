@@ -83,13 +83,25 @@ def read(sftp,p):
 def save(sftp,p,data):
     with sftp.open(p,"wb") as f:f.write(data)
 def patch_js(t):
-    if t.count(OLD_BOOT)!=1:raise RuntimeError("Restore bootstrap changed; refusing patch")
-    if t.count(OLD_META)!=1:raise RuntimeError("Cache metadata writer changed; refusing patch")
+    anchor="function scheduleRetainedSprRestore(){"
+    after="if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scheduleRetainedSprRestore"
+    if t.count(anchor)!=1 or t.count(after)!=1:
+        raise RuntimeError("Expected one existing page-reload restore function and handler")
+    a=t.index(anchor); b=t.index(after,a)
+    current=t[a:b]
+    if not (0<len(current)<5000 and "restoreRetainedSpr().catch" in current and
+            "sprLoadSerial" in current and "requestIdleCallback" in current):
+        raise RuntimeError("Existing bootstrap has unfamiliar behaviour; refusing")
     if "async function sprOriginalPdfMatchesIndex(buffer)" not in t:
         raise RuntimeError("Working Build 687 original PDF SHA safeguard missing")
     if "order:Number.isFinite(standby._startIndex)" not in t:
         raise RuntimeError("Working Shift 53 standby-order fix missing")
-    return t.replace(OLD_BOOT,NEW_BOOT,1).replace(OLD_META,NEW_META,1)
+    t=t[:a]+NEW_BOOT+t[b:]
+    if t.count(OLD_META)==1:
+        t=t.replace(OLD_META,NEW_META,1)
+    else:
+        raise RuntimeError("Cache metadata writer changed; refusing patch")
+    return t
 def patch_html(t,name):
     if t.count(OLD_CACHE)!=1:raise RuntimeError("Unexpected cache reference in "+name)
     if 'class="build-number">Build 687' not in t:raise RuntimeError("Live Build 687 label mismatch")
