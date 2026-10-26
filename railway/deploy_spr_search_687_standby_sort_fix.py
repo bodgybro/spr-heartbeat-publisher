@@ -37,8 +37,15 @@ def update(n,source):
         return t.replace(OLD,NEW,1).encode("utf-8")
     if NAME not in t:raise RuntimeError("Live build label changed unexpectedly: "+n)
     if NEW_CACHE in t and OLD_CACHE not in t:return source
-    if t.count(OLD_CACHE)!=1:raise RuntimeError("Unexpected script version references in "+n)
-    return t.replace(OLD_CACHE,NEW_CACHE,1).encode("utf-8")
+    import re
+    # Some live page shells render script.js?v references more than once.
+    # Change only script.js cache keys, never the visible Build 687 label.
+    updated,count=re.subn(r'script\\.js\\?v=[A-Za-z0-9_.-]+',NEW_CACHE,t)
+    if not count:
+        print("[STANDBY ORDER CACHE REF MISSING]",n,"page left unchanged",flush=True)
+        return source
+    print("[STANDBY ORDER CACHE REFS]",n,count,flush=True)
+    return updated.encode("utf-8")
 def main():
     keydata=base64.b64decode(os.environ["SFTP_PRIVATE_KEY_B64"]).decode()
     key=None
