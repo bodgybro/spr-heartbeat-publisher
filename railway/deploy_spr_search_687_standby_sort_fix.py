@@ -40,7 +40,7 @@ def update(n,source):
     import re
     # Some live page shells render script.js?v references more than once.
     # Change only script.js cache keys, never the visible Build 687 label.
-    updated,count=re.subn(r'script\\.js\\?v=[A-Za-z0-9_.-]+',NEW_CACHE,t)
+    updated,count=re.subn(r'script\.js\?v=[A-Za-z0-9_.-]+',NEW_CACHE,t)
     if not count:
         print("[STANDBY ORDER CACHE REF MISSING]",n,"page left unchanged",flush=True)
         return source
