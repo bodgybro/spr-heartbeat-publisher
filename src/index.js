@@ -14,7 +14,21 @@ function authorized(request, env) {
   return Boolean(env.SPR_COMMAND_KEY) && auth === "Bearer " + env.SPR_COMMAND_KEY;
 }
 
-async function status(env) {
+// Per-isolate, short-lived cache: reduce Workers KV reads from repeated public
+// status polling while preserving near-live Admin command progress.
+const STATUS_IDLE_CACHE_MS = 30000;
+const STATUS_BUSY_CACHE_MS = 5000;
+let statusCache = null;
+let statusPromise = null;
+let statusCacheEpoch = 0;
+
+function invalidateStatusCache() {
+  statusCacheEpoch += 1;
+  statusCache = null;
+  statusPromise = null;
+}
+
+async function readStatus(env) {
   const checked = Math.floor(Date.now() / 1000);
   let upstream = null;
   let source = "none";
@@ -91,6 +105,32 @@ async function status(env) {
   };
 }
 
+async function status(env) {
+  const now = Date.now();
+  if (statusCache && now < statusCache.expiresAt) {
+    return { ...statusCache.value, checked_at: Math.floor(now / 1000) };
+  }
+  if (statusPromise) {
+    return { ...(await statusPromise), checked_at: Math.floor(Date.now() / 1000) };
+  }
+  const epoch = statusCacheEpoch;
+  const inFlight = readStatus(env).then(result => {
+    if (epoch === statusCacheEpoch) {
+      statusCache = {
+        value: result,
+        expiresAt: Date.now() + (result.command_pending ? STATUS_BUSY_CACHE_MS : STATUS_IDLE_CACHE_MS),
+      };
+    }
+    return result;
+  });
+  statusPromise = inFlight;
+  try {
+    return { ...(await inFlight), checked_at: Math.floor(Date.now() / 1000) };
+  } finally {
+    if (statusPromise === inFlight) statusPromise = null;
+  }
+}
+
 async function queueCommand(request, env) {
   if (!authorized(request, env)) return json({ ok:false, error:"unauthorized" }, 401);
   let body;
@@ -101,6 +141,7 @@ async function queueCommand(request, env) {
   if (existing) return json({ok:false,error:"busy"},409);
   const item = { id: crypto.randomUUID(), command, created_at: Math.floor(Date.now()/1000) };
   await env.SPR_COMMANDS.put("pending", JSON.stringify(item), { expirationTtl: 3600 });
+  invalidateStatusCache();
   return json({ok:true, queued:true, id:item.id, command});
 }
 
@@ -111,6 +152,7 @@ async function cancelCommand(request, env) {
   const pending = JSON.parse(raw);
   pending.cancelled_at = Math.floor(Date.now()/1000);
   await env.SPR_COMMANDS.put("pending", JSON.stringify(pending), { expirationTtl: 300 });
+  invalidateStatusCache();
   return json({ok:true,cancelled:true,id:pending.id});
 }
 
@@ -132,6 +174,7 @@ async function pollCommand(request, env) {
   if (!item.claimed_at) {
     item.claimed_at = Math.floor(Date.now()/1000);
     await env.SPR_COMMANDS.put("pending", JSON.stringify(item), { expirationTtl: 3600 });
+    invalidateStatusCache();
   }
   return json({ok:true, command:item});
 }
@@ -194,6 +237,7 @@ async function heartbeatWorker(request, env) {
     last_message: String(body?.last_message || "").slice(0,1400),
   };
   await env.SPR_COMMANDS.put("heartbeat", JSON.stringify(payload), { expirationTtl: 10800 });
+  invalidateStatusCache();
   return json({ok:true,last_seen:now});
 }
 
@@ -212,6 +256,7 @@ async function progressCommand(request, env) {
   pending.progress_at = Math.floor(Date.now()/1000);
   if (!pending.claimed_at) pending.claimed_at = pending.progress_at;
   await env.SPR_COMMANDS.put("pending", JSON.stringify(pending), { expirationTtl: 3600 });
+  invalidateStatusCache();
   return json({ok:true});
 }
 
@@ -223,6 +268,7 @@ async function recordSuccess(request, env) {
   if (!["spr","rosters"].includes(command)) return json({ok:false,error:"invalid_command"},400);
   const completedAt = Number(body?.completed_at || Math.floor(Date.now()/1000));
   await env.SPR_COMMANDS.put("last_success:" + command, String(completedAt));
+  invalidateStatusCache();
   return json({ok:true,command,completed_at:completedAt});
 }
 
@@ -243,6 +289,7 @@ async function ackCommand(request, env) {
   if (Boolean(body?.ok) && ["spr","rosters"].includes(completedCommand)) {
     await env.SPR_COMMANDS.put("last_success:" + completedCommand, String(completedAt));
   }
+  invalidateStatusCache();
   if (body?.id) {
     await env.SPR_COMMANDS.put("result:" + body.id, JSON.stringify({
       id: body.id,
