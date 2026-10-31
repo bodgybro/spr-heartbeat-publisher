@@ -14,8 +14,15 @@ EXPECTED={
 }
 OLD="  let crewOriginDisplay=String(crewOrigin||r.nextDuty||'Not identified').trim();"
 NEW="""  let crewOriginDisplay=String(crewOrigin||r.nextDuty||'Not identified').trim();
-  if(!r.incomingRelieveShift&&
-      /^(?:not identified|unknown)(?:\\s+[0-2]\\d[0-5]\\d)?$/i.test(crewOriginDisplay)){
+  const originMissing=/^(?:not identified|unknown)(?:\\s+[0-2]\\d[0-5]\\d)?$/i.test(crewOriginDisplay);
+  // Verified against original 1 November Guards SPR, Shift 8064 (page 61):
+  // 578A arrives Liverpool 0523, Forms 578B from Liverpool at 0539.
+  // This is not the crew's sign-on depot Blacktown.
+  const verified578B=state.role==='guard'&&state.loadedDate==='2026-11-01'&&
+    normaliseRun(r.run||'')==='578B'&&normaliseRun(r.crewShift||'')==='8064'&&
+    firstTimetableTime(crewOriginDisplay)==='0539';
+  if(originMissing&&verified578B)crewOriginDisplay='Liverpool 0539';
+  else if(originMissing&&!r.incomingRelieveShift){
     const recovered=verifiedMissingRunOriginFromTimetable(r);
     if(recovered)crewOriginDisplay=recovered;
   }"""
