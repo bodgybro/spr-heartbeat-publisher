@@ -21,7 +21,7 @@ MARKER = '// SPR_RUN_HEADER_ORIGIN_20261101'
 VERSION = '700-568b-richmond-origin-20261101'
 ORIGINAL = """  const labelledDutyDetails=approach
     ?dutyDetails
-    :\`<div class="secondary">Location: \${esc(crewOrigin||r.nextDuty||'Not identified')}</div>\${destinationRow}\`;"""
+    :`<div class="secondary">Location: ${esc(crewOrigin||r.nextDuty||'Not identified')}</div>${destinationRow}`;"""
 REPLACEMENT = r"""  // SPR_RUN_HEADER_ORIGIN_20261101
   // PDF.js sometimes combines the printed shift/page heading with the first
   // departure time. "Shift 8911 1 of 1 0635" is NEVER a station.
@@ -51,7 +51,7 @@ REPLACEMENT = r"""  // SPR_RUN_HEADER_ORIGIN_20261101
   }
   const labelledDutyDetails=approach
     ?dutyDetails
-    :\`<div class="secondary">Location: \${esc(crewOriginDisplay)}</div>\${destinationRow}\`;"""
+    :`<div class="secondary">Location: ${esc(crewOriginDisplay)}</div>${destinationRow}`;"""
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
