@@ -42,6 +42,7 @@ _DUAL_ROSTER_SYNC_PRIMARY=sync_all_rosters_online
 _DUAL_SPR_UPDATE_PRIMARY=run_update
 _DUAL_INDEX_PRIMARY_CURRENT=_spr_primary_index_current
 _DUAL_INDEX_PRIMARY_PUBLISH=_spr_publish_index_primary_sftp
+_DUAL_INDEX_BACKGROUND_PRIMARY=_spr_index_background
 
 def _dual_enabled():
     return str(os.environ.get("SPR_DUAL_SITE_ENABLED","1")).strip()=="1"
@@ -298,9 +299,17 @@ def _spr_publish_index_primary_sftp(date,role,source_sha,compressed):
         _dual_release_connection()
     if err:
         print("  [DUAL INDEX PARTIAL] "+date+" "+role+" "+str(err)[:400],flush=True)
+    if err:
+        raise RuntimeError("Prepared index incomplete across the two websites: "+str(err)[:400])
     if not ok:
         raise RuntimeError("Prepared indexes failed on both websites: "+str(err)[:400])
     return ok.get("bodgybros")
+
+def _spr_index_background(jobs):
+    try:
+        return _DUAL_INDEX_BACKGROUND_PRIMARY(jobs)
+    finally:
+        _dual_release_connection()
 
 def upload_cached_roster_pdf(url,name,data,cache_path=""):
     if not _dual_enabled():
@@ -430,6 +439,33 @@ def apply(path):
     mains=[n for n in tree.body if isinstance(n,ast.If) and
         ("__name__" in (ast.get_source_segment(source,n.test) or ""))]
     if not mains:raise RuntimeError("Updater main boundary not found")
+    # Preserve primary fast index page; only fall back to Kustom when the
+    # original site's public page cannot load (DNS outage, TLS, etc.).
+    primary_index_fragment=(
+        "    site='https://www.bodgybros.com/sps'\n"
+        "    page.goto(site+'/',wait_until='domcontentloaded',timeout=45000)\n"
+        "    page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === \"function\"',timeout=25000)\n")
+    fallback_index_fragment=(
+        "    site='https://www.bodgybros.com/sps'\n"
+        "    try:\n"
+        "        page.goto(site+'/',wait_until='domcontentloaded',timeout=45000)\n"
+        "        page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === \"function\"',timeout=25000)\n"
+        "    except Exception as original_error:\n"
+        "        print('  [DUAL INDEX PAGE FALLBACK] Bodgybros unavailable: '+str(original_error)[:120],flush=True)\n"
+        "        site='https://www.kustomvinyls.com/sps'\n"
+        "        page.goto(site+'/',wait_until='domcontentloaded',timeout=45000)\n"
+        "        page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === \"function\"',timeout=25000)\n")
+    index_nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="_spr_publish_index"]
+    if not index_nodes:
+        raise RuntimeError("Expected background SPR index builder missing")
+    index_node=index_nodes[-1]
+    current_index="".join(source.splitlines(keepends=True)[index_node.lineno-1:index_node.end_lineno])
+    if current_index.count(primary_index_fragment)!=1:
+        raise RuntimeError("Current Build700 index page navigation differed; refusing unsafe fallback")
+    source=source.replace(primary_index_fragment,fallback_index_fragment,1)
+    tree=ast.parse(source)
+    mains=[n for n in tree.body if isinstance(n,ast.If) and
+        ("__name__" in (ast.get_source_segment(source,n.test) or ""))]
     target=mains[-1].lineno-1
     lines=source.splitlines(keepends=True)
     revised="".join(lines[:target])+EXTENSION+"\n"+"".join(lines[target:])
