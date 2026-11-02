@@ -127,6 +127,9 @@ try:
     finally:
         out.close();receiving.close()
 
+    # Clean up old incomplete SFTP temp files in the private staging tree
+    # before generating the destination file manifest.
+    run(dst,"find "+q(DST_STAGE)+" -type f -name '*.transfer-*' -delete",timeout=30)
     # SHA-256 from original source disk and new target disk; independent of
     # stream verification. Compares every selected file, not sizes only.
     actual_src=hash_manifest(src,SRC_ROOT)
