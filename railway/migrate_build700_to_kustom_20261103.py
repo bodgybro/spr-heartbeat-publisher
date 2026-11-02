@@ -51,22 +51,28 @@ def connect(host,user,key,known,port):
     cli.set_missing_host_key_policy(paramiko.RejectPolicy())
     cli.connect(hostname=host,username=user,pkey=key,port=port,
       timeout=15,auth_timeout=15,banner_timeout=15,look_for_keys=False,allow_agent=False)
+    cli.get_transport().set_keepalive(20)
     return cli
 
+_KNOWN_DEST_DIRS=set()
 def mkdir_all(sftp,path):
+    if path in _KNOWN_DEST_DIRS:return
     pieces=path.split("/")
     cur=""
     for piece in pieces:
         if not piece:continue
         cur+="/"+piece
+        if cur in _KNOWN_DEST_DIRS:continue
         try:attr=sftp.stat(cur)
         except FileNotFoundError:
             sftp.mkdir(cur,0o755)
         else:
             if not stat.S_ISDIR(attr.st_mode):raise RuntimeError("Cannot make folder; file exists")
+        _KNOWN_DEST_DIRS.add(cur)
 def remote_digest(sftp,path):
     h=hashlib.sha256()
     with sftp.open(path,"rb") as f:
+        f.prefetch(max_concurrent_requests=32)
         for chunk in iter(lambda:f.read(1048576),b""):
             h.update(chunk)
     return h.hexdigest()
@@ -83,7 +89,9 @@ def copy_bytes(dest,rel,data,mode=0o644):
     except FileNotFoundError:pass
     tmp=target+".transfer-"+str(os.getpid())
     try:
-        with dest.open(tmp,"wb") as f:f.write(data)
+        with dest.open(tmp,"wb") as f:
+            f.set_pipelined(True)
+            f.write(data)
         if remote_digest(dest,tmp)!=newdigest:raise RuntimeError("Uploaded SHA mismatch "+rel)
         dest.chmod(tmp,mode)
         dest.posix_rename(tmp,target)
@@ -106,6 +114,7 @@ def copy_stream(src,dest,rel,size):
             # For resumed copies verify against source rather than trusting size.
             h=hashlib.sha256()
             with src.open(origin,"rb") as f:
+                f.prefetch(max_concurrent_requests=32)
                 for chunk in iter(lambda:f.read(1048576),b""):h.update(chunk)
             if remote_digest(dest,target)==h.hexdigest():
                 state["existing"]+=1
@@ -115,6 +124,8 @@ def copy_stream(src,dest,rel,size):
     expected=hashlib.sha256()
     try:
         with src.open(origin,"rb") as fin,dest.open(tmp,"wb") as fout:
+            fin.prefetch(max_concurrent_requests=32)
+            fout.set_pipelined(True)
             while True:
                 chunk=fin.read(1048576)
                 if not chunk:break
