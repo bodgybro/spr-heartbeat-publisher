@@ -6,7 +6,7 @@ disables validation. Checks if a job is already running, lists excluded
 domains, starts standard cPanel SSL certificate check for the user, polls
 public certificate SAN for apex/www and records any AutoSSL problems.
 """
-import os,paramiko,json,ssl,socket,time
+import os,paramiko,json,ssl,socket,time,re
 from cryptography import x509
 HOST="cp-wc18.per01.ds.network"
 USER="kustomvi"
@@ -53,7 +53,8 @@ try:
         log("Current TLS read unavailable",type(exc).__name__)
     excl=uapi("get_autossl_excluded_domains")
     excluded=str((excl or {}).get("data") or "").lower()
-    target_excluded=any(d in excluded for d in DOMAINS)
+    excluded_domains=set(re.findall(r"(?:[a-z0-9_-]+\.)*kustomvinyls\.com",excluded))
+    target_excluded=bool(set(DOMAINS)&excluded_domains)
     if target_excluded:
         log("A required domain is explicitly excluded from AutoSSL; will not change user exclusion settings")
         raise SystemExit(0)
