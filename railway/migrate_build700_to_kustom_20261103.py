@@ -32,7 +32,7 @@ SOURCE_ROOT=os.environ["SFTP_ROOT"].replace("\\","/").rstrip("/")
 if SOURCE_ROOT.endswith("/sps/spr"):SOURCE_ROOT=SOURCE_ROOT[:-4]
 elif SOURCE_ROOT.endswith("/public_html"):SOURCE_ROOT+="/sps"
 if not SOURCE_ROOT.endswith("/sps"):raise RuntimeError("Unexpected source SFTP root")
-STATIC_REGEX=re.compile(r"^All (Drivers|Guards) Combined (\d\d)_(\d\d)_(20\d\d\d\d)\.pdf$",re.I)
+STATIC_REGEX=re.compile(r"^All (Drivers|Guards) Combined (\d\d)_(\d\d)_(20\d\d)\.pdf$",re.I)
 TEXT_SUFFIXES={".js",".php",".html",".css",".json",".txt",".htaccess",".svg",".webmanifest"}
 state={"files":0,"bytes":0,"pdfs":0,"rosters":0,"existing":0,"errors":0}
 start=time.monotonic()
@@ -93,7 +93,7 @@ def copy_bytes(dest,rel,data,mode=0o644):
         except OSError:pass
     state["files"]+=1
     state["bytes"]+=len(data)
-    if state["files"]%12==0:log("copied",state["files"],"files",state["bytes"],"bytes",flush=True)
+    if state["files"]%12==0:log("copied",state["files"],"files",state["bytes"],"bytes")
 def copy_stream(src,dest,rel,size):
     if size+state["bytes"]>MAX_TOTAL_BYTES:
         raise RuntimeError("Transfer byte cap reached during "+rel)
@@ -222,7 +222,7 @@ def main():
                 log("Destination free bytes",free)
                 if free<MIN_SPARE_BYTES+80*1024*1024:
                     raise RuntimeError("Not enough free hosting space")
-            except OSError as exc:
+            except (OSError,AttributeError) as exc:
                 log("Hosting quota query unavailable",type(exc).__name__)
             # Metadata planning first: do not transfer until required files present.
             rosters=selected_roster_source(src)
@@ -235,7 +235,7 @@ def main():
                 v=dest.statvfs(DEST_PARENT)
                 available=v.f_bavail*v.f_frsize
                 if available<estimated+MIN_SPARE_BYTES:raise RuntimeError("Hosting storage insufficient for current PDFs and roster copy")
-            except OSError as exc:
+            except (OSError,AttributeError) as exc:
                 log("Storage verification unavailable",type(exc).__name__)
             # Write working application before large PDFs, everything outside webroot.
             for info in entries:
