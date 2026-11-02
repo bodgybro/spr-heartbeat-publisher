@@ -251,7 +251,8 @@ def _dual_kustom_index_current(date,role,sha):
             meta=json.loads(stream.read(120000).decode("utf-8"))
         gz=ftp.stat(_dual_rel(base+".json.gz"))
         return (meta.get("sourceSha")==sha and meta.get("parserBuild")==658 and
-            meta.get("pageLayoutBuild")==595 and meta.get("compressedBytes")==gz.st_size and gz.st_size>0)
+            meta.get("pageLayoutBuild")==595 and meta.get("roleValidated") is True and
+            meta.get("compressedBytes")==gz.st_size and gz.st_size>0)
     except FileNotFoundError:
         return False
 
@@ -290,7 +291,8 @@ def _spr_publish_index_primary_sftp(date,role,source_sha,compressed):
         metadata={
             "ok":True,"date":date,"role":role,"sourceSha":source_sha,
             "parserBuild":658,"pageLayoutBuild":595,
-            "updatedAt":int(_dual_time.time()),"compressedBytes":len(compressed)}
+            "updatedAt":int(_dual_time.time()),"compressedBytes":len(compressed),
+            "roleValidated":True}
         ms,_=_dual_store(base+".meta.json",json.dumps(metadata,separators=(",",":")).encode("utf-8"))
         ok["kustom"]=st
         print("  [DUAL KUSTOM INDEX VERIFIED] "+date+" "+role+" "+st+" meta "+ms,flush=True)
