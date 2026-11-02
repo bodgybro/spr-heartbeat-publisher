@@ -422,7 +422,7 @@ def apply(path):
         "# SPR_ROSTER_SFTP_PUBLISH_VERIFIED_20261101",
         "# SPR_ROSTER_SFTP_CONNECTION_REUSE_20261101",
         "# SPR_SCHEDULE_08_12_16_22_700",
-        "BODGYBROS SINGLE-SITE SPR pre-indexing installed",
+        "# SPR_SINGLE_SITE_BODGYBROS_674",
     )
     for marker in required:
         if marker not in source:
