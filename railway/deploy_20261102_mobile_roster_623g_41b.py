@@ -7,7 +7,8 @@ saved indexes, and fast desktop behavior. Correct only the reported Drivers
 Create a NEW JS filename to bypass previously stale mobile caches. Verify
 staged and final SHA-256 for each SFTP file; rollback on any failure.
 """
-import os,io,base64,posixpath,re,hashlib
+import os,io,base64,posixpath,re,hashlib,subprocess,shutil,tempfile
+from pathlib import Path
 import paramiko
 
 EXPECTED_JS="6b11ee68197215aeb64d917ad610fec3"
@@ -216,6 +217,26 @@ def main():
         for name in ('index.php','index.html'):
             originals[name]=read(ftp,posixpath.join(root,name))
         fresh[NEW_JS]=patch(old.decode('utf-8')).encode('utf-8')
+        # Validate the resulting module with Playwright's bundled Node before
+        # any SFTP write, so a syntax error can never break the live website.
+        node=shutil.which('node')
+        if not node:
+            import importlib.util
+            spec=importlib.util.find_spec('playwright')
+            if spec and spec.submodule_search_locations:
+                candidate=Path(list(spec.submodule_search_locations)[0])/'driver'/'node'
+                if candidate.is_file():node=str(candidate)
+        if not node:raise RuntimeError('JavaScript syntax checker unavailable; no site writes')
+        with tempfile.NamedTemporaryFile('wb',suffix='.js',delete=False) as tempjs:
+            tempjs.write(fresh[NEW_JS])
+            check_path=tempjs.name
+        try:
+            verify=subprocess.run([node,'--check',check_path],capture_output=True,text=True,timeout=20)
+            if verify.returncode:
+                raise RuntimeError('Generated JS failed syntax check: '+verify.stderr[:350])
+            print('[MOBILE 224 JS SYNTAX VERIFIED]',flush=True)
+        finally:
+            os.unlink(check_path)
         if hash256(originals['script.js'])==hash256(old):
             fresh['script.js']=fresh[NEW_JS]
         else:
