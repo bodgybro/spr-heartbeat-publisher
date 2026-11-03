@@ -81,6 +81,13 @@ try:
     finally:
         try:target.remove(smoke)
         except Exception:pass
+    with target.open(posixpath.join(TARGET,".roster-cache","manifest.json"),"rb") as check:
+        previous=json.loads(check.read(180000))
+    root_url=previous.get("root")
+    rows=previous.get("entries") or []
+    folders=[x for x in rows if x.get("kind")=="folder" and x.get("parent_url")==root_url]
+    pdfs=[x for x in rows if x.get("kind")=="pdf"]
+    log("CURRENT KUSTOM ROSTER MANIFEST rootFolders",len(folders),"PDFs",len(pdfs),"totalEntries",len(rows))
     matched=0
     for role,label in (("d","Drivers"),("g","Guards")):
         name="All "+label+" Combined 03_11_2026.pdf"
