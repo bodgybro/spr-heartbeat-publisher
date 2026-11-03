@@ -43,6 +43,7 @@ _DUAL_SPR_UPDATE_PRIMARY=run_update
 _DUAL_INDEX_PRIMARY_CURRENT=_spr_primary_index_current
 _DUAL_INDEX_PRIMARY_PUBLISH=_spr_publish_index_primary_sftp
 _DUAL_INDEX_BACKGROUND_PRIMARY=_spr_index_background
+_DUAL_INDEX_BUILDER_BASE=_spr_publish_index
 
 def _dual_enabled():
     return str(os.environ.get("SPR_DUAL_SITE_ENABLED","1")).strip()=="1"
@@ -307,6 +308,46 @@ def _spr_publish_index_primary_sftp(date,role,source_sha,compressed):
         raise RuntimeError("Prepared indexes failed on both websites: "+str(err)[:400])
     return ok.get("bodgybros")
 
+class _DualIndexPageProxy:
+    """Use Kustom indexer UI only when original Bodgybros indexer page fails."""
+    def __init__(self,page):
+        self._page=page
+        self._url=""
+        self._used_secondary=False
+    def _fallback(self,url,*args,**kwargs):
+        if self._used_secondary:
+            raise RuntimeError("Kustom fallback already attempted")
+        self._used_secondary=True
+        alt=url.replace("www.bodgybros.com","www.kustomvinyls.com")
+        if alt==url:
+            alt=url.replace("bodgybros.com","kustomvinyls.com")
+        print("  [DUAL INDEX PAGE FALLBACK] Using Kustom indexer page",flush=True)
+        self._url=alt
+        return self._page.goto(alt,*args,**kwargs)
+    def goto(self,url,*args,**kwargs):
+        self._url=str(url)
+        try:
+            return self._page.goto(url,*args,**kwargs)
+        except Exception:
+            if "bodgybros.com/sps" in str(url):
+                return self._fallback(url,*args,**kwargs)
+            raise
+    def wait_for_function(self,*args,**kwargs):
+        try:
+            return self._page.wait_for_function(*args,**kwargs)
+        except Exception:
+            if "bodgybros.com/sps" in self._url and not self._used_secondary:
+                self._fallback(self._url,wait_until="domcontentloaded",timeout=45000)
+                return self._page.wait_for_function(*args,**kwargs)
+            raise
+    def __getattr__(self,key):
+        return getattr(self._page,key)
+
+def _spr_publish_index(job,page,cfg):
+    if not _dual_enabled():
+        return _DUAL_INDEX_BUILDER_BASE(job,page,cfg)
+    return _DUAL_INDEX_BUILDER_BASE(job,_DualIndexPageProxy(page),cfg)
+
 def _spr_index_background(jobs):
     try:
         return _DUAL_INDEX_BACKGROUND_PRIMARY(jobs)
@@ -441,33 +482,6 @@ def apply(path):
     mains=[n for n in tree.body if isinstance(n,ast.If) and
         ("__name__" in (ast.get_source_segment(source,n.test) or ""))]
     if not mains:raise RuntimeError("Updater main boundary not found")
-    # Preserve primary fast index page; only fall back to Kustom when the
-    # original site's public page cannot load (DNS outage, TLS, etc.).
-    primary_index_fragment=(
-        "    site='https://www.bodgybros.com/sps'\n"
-        "    page.goto(site+'/',wait_until='domcontentloaded',timeout=45000)\n"
-        "    page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === \"function\"',timeout=25000)\n")
-    fallback_index_fragment=(
-        "    site='https://www.bodgybros.com/sps'\n"
-        "    try:\n"
-        "        page.goto(site+'/',wait_until='domcontentloaded',timeout=45000)\n"
-        "        page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === \"function\"',timeout=25000)\n"
-        "    except Exception as original_error:\n"
-        "        print('  [DUAL INDEX PAGE FALLBACK] Bodgybros unavailable: '+str(original_error)[:120],flush=True)\n"
-        "        site='https://www.kustomvinyls.com/sps'\n"
-        "        page.goto(site+'/',wait_until='domcontentloaded',timeout=45000)\n"
-        "        page.wait_for_function('typeof window.__SPR_INDEXER_API?.build === \"function\"',timeout=25000)\n")
-    index_nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="_spr_publish_index"]
-    if not index_nodes:
-        raise RuntimeError("Expected background SPR index builder missing")
-    index_node=index_nodes[-1]
-    current_index="".join(source.splitlines(keepends=True)[index_node.lineno-1:index_node.end_lineno])
-    if current_index.count(primary_index_fragment)!=1:
-        raise RuntimeError("Current Build700 index page navigation differed; refusing unsafe fallback")
-    source=source.replace(primary_index_fragment,fallback_index_fragment,1)
-    tree=ast.parse(source)
-    mains=[n for n in tree.body if isinstance(n,ast.If) and
-        ("__name__" in (ast.get_source_segment(source,n.test) or ""))]
     target=mains[-1].lineno-1
     lines=source.splitlines(keepends=True)
     revised="".join(lines[:target])+EXTENSION+"\n"+"".join(lines[target:])
