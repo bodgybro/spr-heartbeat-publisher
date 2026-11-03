@@ -47,7 +47,7 @@ def main():
    if 'data-spr-role="demo"' not in css or 'data-spr-role="basic"' not in css:raise RuntimeError('Missing restricted roles')
    import re
    # Bust old stylesheets on all clients; preserve other website imports.
-   newhtml,count=re.subn(r'style\\.css\\?v=[A-Za-z0-9._-]+','style.css?v=700-role-roster-css-v3',html,count=1)
+   newhtml,count=re.subn(r'style\.css\?v=[A-Za-z0-9._-]+','style.css?v=700-role-roster-css-v3',html,count=1)
    if count!=1:raise RuntimeError('Expected one versioned CSS link')
    if 'id="protectedRosterBrowser"' not in newhtml:raise RuntimeError('Roster element absent')
    updated={'style.css':css.encode('utf-8'),'index.php':newhtml.encode('utf-8')}
