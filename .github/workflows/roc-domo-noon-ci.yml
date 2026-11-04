@@ -1,0 +1,91 @@
+name: Test ROC noon-only schedule integration
+on:
+  push:
+    paths:
+      - .github/workflows/roc-domo-noon-ci.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - id: test
+        name: Ensure noon-only thread flag and no startup ROC check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile railway/roc_domo_noon_only_20261104.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import tempfile, sys
+          sys.path.insert(0,'railway')
+          import roc_domo_noon_only_20261104 as p
+          fake=(p.OLD_MARKER+'\nimport threading\nfrom pathlib import Path\n'
+                'DATA_ROOT=Path("/tmp")\n'
+                'def sync_all_rosters_online():\n'
+                '    if True:\n'
+                '        if True:\n'
+                +p.OLD_HOOK
+                +'            depots=_sharepoint_depot_pages(page,root)\n'
+                +'def start_background_update(site, mode="all"):\n'
+                +'    def worker():\n'
+                +'        try:\n'
+                +'            pass\n'
+                +'        except Exception:\n'
+                +'            pass\n'
+                +'    threading.Thread(target=worker,daemon=True).start()\n'
+                +'    return True\n'
+                +'def auto_update_scheduler():\n'
+                +'    for h,m in [(8,0),(12,0),(16,0),(22,0)]:\n'
+                +'        site="example"\n'
+                +'        start_background_update(site)\n'
+                +'def _roc_domo_startup_catchup():\n'
+                +'    pass\n'
+                +'if __name__=="__main__":\n'
+                +'    threading.Thread(target=auto_update_scheduler,daemon=True).start()\n'
+                +p.STARTUP_CALL+'\n')
+          with tempfile.TemporaryDirectory() as temp:
+              target=Path(temp)/'updater.py'
+              target.write_text(fake)
+              p.apply(target)
+              actual=target.read_text()
+              assert p.MARKER in actual
+              assert '_roc_domo_startup_catchup' not in actual
+              assert 'roc_noon=(h==12 and m==0)' in actual
+              assert '_roc_domo_noon_thread.enabled = bool(roc_noon)' in actual
+              assert 'if getattr(_roc_domo_noon_thread, "enabled", False):' in actual
+              assert 'threading.Thread(target=auto_update_scheduler' in actual
+              assert '[(8,0),(12,0),(16,0),(22,0)]' in actual
+              assert 'name=\'roc-domo-catchup\'' not in actual
+              prior=actual
+              p.apply(target)
+              assert target.read_text()==prior
+          print('Passed: ROC only on noon-tagged update, no startup/manual/other slots')
+          PY
+      - name: Record concise test status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ steps.test.outcome }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/roc-noon-test-result"
+          mkdir -p "$work/status"
+          git -C "$work" init -q
+          git -C "$work" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git -C "$work" config user.name 'github-actions[bot]'
+          git -C "$work" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git -C "$work" ls-remote --exit-code --heads origin roc-domo-noon-ci-result >/dev/null 2>&1; then
+            git -C "$work" fetch -q origin roc-domo-noon-ci-result
+            git -C "$work" checkout -qb roc-domo-noon-ci-result FETCH_HEAD
+          else
+            git -C "$work" checkout -qb roc-domo-noon-ci-result
+          fi
+          printf 'ROC noon-only integration tests: %s\nRun ID: %s\n' "$RESULT" "$GITHUB_RUN_ID" > "$work/status/result.txt"
+          git -C "$work" add status/result.txt
+          git -C "$work" commit -qm 'Record ROC noon-only integration checks'
+          git -C "$work" push -q origin HEAD:refs/heads/roc-domo-noon-ci-result
