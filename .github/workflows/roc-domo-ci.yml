@@ -1,0 +1,61 @@
+name: ROC DOMO downloader code safety checks
+on:
+  push:
+    paths:
+      - .github/workflows/roc-domo-ci.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - id: test
+        name: Verify ROC downloader syntax and CSV/date selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile railway/roc_domo_daily_worker_20261104.py railway/roc_domo_integrate_patch_20261104.py
+          python3 - <<'PY'
+          import sys,csv,io
+          from datetime import date
+          sys.path.insert(0,'railway')
+          import roc_domo_daily_worker_20261104 as m
+          day=date(2026,11,3)
+          assert m._month_match("November 2026",day)
+          assert m._month_match("11 November",day)
+          assert m._day_match("Tuesday 03 November 2026",day)
+          assert not m._day_match("Wednesday 04 November 2026",day)
+          assert m._csv_match("Report - Daily Safety Incidents - Excel Extract - Tuesday 03 November 2026.csv",day)
+          assert not m._csv_match("Report - Daily Safety Incidents - Excel Extract - Tuesday 04 November 2026.csv",day)
+          data=(','.join(m.EXPECTED)+'\n'+','.join(['x']*len(m.EXPECTED))+'\n').encode()
+          assert m._validate(data)==1
+          try:
+              m._validate(b'garbage')
+          except Exception:
+              pass
+          else:
+              raise AssertionError('Malformed ROC CSV was accepted')
+          print('ROC date, file match and 9-field CSV validation tests passed')
+          PY
+      - name: Record only test result
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ steps.test.outcome }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/roc-ci"
+          mkdir -p "$work/status"
+          git -C "$work" init -q
+          git -C "$work" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git -C "$work" config user.name 'github-actions[bot]'
+          git -C "$work" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$work" checkout -qb roc-domo-ci-result
+          printf 'ROC DOMO validation: %s\nRun ID: %s\n' "$RESULT" "$GITHUB_RUN_ID" > "$work/status/result.txt"
+          git -C "$work" add status
+          git -C "$work" commit -qm 'Record safe ROC DOMO downloader syntax and validation results'
+          git -C "$work" push -q origin HEAD:refs/heads/roc-domo-ci-result
