@@ -31,29 +31,42 @@ def _say(value):
 
 
 def _items(page, rel, what):
-    """List one folder using the authenticated SharePoint REST context."""
+    """Enumerate SharePoint items using the actual ROC web or its parent site."""
     if what not in ("Folders", "Files") or not rel.startswith(YEAR_ROOT + "/"):
         raise ValueError("Unexpected SharePoint ROC folder")
     safe = quote(rel.replace("'", "''"), safe="/")
-    endpoints = [
-        SITE + "/_api/web/GetFolderByServerRelativePath(decodedurl='" + safe + "')",
-        SITE + "/_api/web/GetFolderByServerRelativeUrl('" + safe + "')"
-    ]
+    bases = []
+    try:
+        inferred = page.evaluate(
+            "() => (window._spPageContextInfo && window._spPageContextInfo.webAbsoluteUrl) || ''"
+        )
+        if isinstance(inferred, str) and inferred.startswith(SITE):
+            bases.append(inferred.rstrip("/"))
+    except Exception:
+        pass
+    for base in (SITE + "/PR", SITE):
+        if base not in bases:
+            bases.append(base)
     errors = []
-    for base in endpoints:
-        url = base + "/" + what + "?%24select=Name,ServerRelativeUrl&%24top=3000"
-        try:
-            resp = page.context.request.get(
-                url, timeout=15000, fail_on_status_code=False,
-                headers={"Accept": "application/json;odata=nometadata",
-                         "Cache-Control": "no-cache"}
-            )
-            if not resp.ok:
-                errors.append("HTTP " + str(resp.status))
-                continue
-            data = resp.json()
-            items = data.get("value", data.get("d", {}).get("results", []))
-            if isinstance(items, list):
+    saw_empty = False
+    for web in bases:
+        for call in ("GetFolderByServerRelativePath(decodedurl='" + safe + "')",
+                     "GetFolderByServerRelativeUrl('" + safe + "')"):
+            url = (web + "/_api/web/" + call + "/" + what +
+                   "?%24select=Name,ServerRelativeUrl&%24top=3000")
+            try:
+                resp = page.context.request.get(
+                    url, timeout=13000, fail_on_status_code=False,
+                    headers={"Accept": "application/json;odata=nometadata",
+                             "Cache-Control": "no-cache"})
+                if not resp.ok:
+                    errors.append("HTTP " + str(resp.status))
+                    continue
+                data = resp.json()
+                items = data.get("value", data.get("d", {}).get("results", []))
+                if not isinstance(items, list):
+                    errors.append("unexpected response shape")
+                    continue
                 out = []
                 for entry in items:
                     if not isinstance(entry, dict):
@@ -63,13 +76,17 @@ def _items(page, rel, what):
                                (entry.get("ServerRelativePath") or {}).get("DecodedUrl") or "")
                     if name and path.startswith(YEAR_ROOT + "/"):
                         out.append({"name": name, "path": path})
-                return out
-            errors.append("unexpected response shape")
-        except Exception as exc:
-            errors.append(type(exc).__name__)
+                if out:
+                    _say("SharePoint " + what + ": " + str(len(out)) +
+                         " found via " + web.rsplit("/",1)[-1])
+                    return out
+                saw_empty = True
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+    if saw_empty:
+        return []
     raise RuntimeError("ROC folder enumeration unavailable (" +
-                       ", ".join(errors[:4]) + ")")
-
+                       ", ".join(errors[:5]) + ")")
 
 def _month_match(name, date):
     low = re.sub(r"[^a-z0-9]", " ", name.lower())
