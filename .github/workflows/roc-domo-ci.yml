@@ -32,6 +32,22 @@ jobs:
           assert not m._csv_match("Report - Daily Safety Incidents - Excel Extract - Tuesday 04 November 2026.csv",day)
           data=(','.join(m.EXPECTED)+'\n'+','.join(['x']*len(m.EXPECTED))+'\n').encode()
           assert m._validate(data)==1
+          class Response:
+              ok=True
+              def json(self):
+                  return {'value':[{'Name':'November','ServerRelativeUrl':m.YEAR_ROOT+'/2026/November'}]}
+          class Request:
+              def get(self,url,**kwargs):
+                  assert '/PR/_api/web/' in url
+                  return Response()
+          class Context:
+              request=Request()
+          class Page:
+              context=Context()
+              def evaluate(self,js):
+                  return m.SITE+'/PR'
+          folders=m._items(Page(),m.YEAR_ROOT+'/2026','Folders')
+          assert len(folders)==1 and folders[0]['name']=='November'
           try:
               m._validate(b'garbage')
           except Exception:
