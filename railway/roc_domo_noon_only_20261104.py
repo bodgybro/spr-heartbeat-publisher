@@ -83,7 +83,6 @@ def apply(path):
     src=src.replace(STARTUP_CALL,"",1)
     # Explicitly associate this scheduled update with its worker thread;
     # a wall-clock comparison during the roster stage would be inaccurate.
-    src="_roc_domo_noon_thread=threading.local()\n"+src if False else src
     anchor=EXACT_START
     src=src.replace(anchor,"_roc_domo_noon_thread=threading.local()\n\n"+CHANGED_START,1)
     src=edit_function(src,"start_background_update",
