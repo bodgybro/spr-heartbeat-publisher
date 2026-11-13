@@ -54,7 +54,7 @@ HELPER = '''def _roc_manual_check():
             _wait_for_sharepoint_profile_release()
     _set_online_progress("ROC: CSV verified on Bodgybros and Kustomvinyls")
     _record_online_success("roc")
-    return [{"role":"ROC","message":"CSV checked and verified on both websites (new or existing)"}]
+    return [{"role":"ROC","message":"CSV checked and verified on both websites (new or existing)","ok":True}]
 '''
 
 def patch(src):
