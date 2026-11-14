@@ -17,7 +17,7 @@ $html=file_get_contents($index);
 $readerSource=file_get_contents($reader);
 if($source===false||$html===false||$readerSource===false){fwrite(STDERR,"STOP: Cannot read source.\n");exit(1);}
 if(str_contains($source,'TIMESHEET_IOS_FULL_PDF_20261114')){echo "ALREADY INSTALLED: No changes.\n";exit(0);}
-$needle="        tab.document.getElementById('viewer').src=url;";
+$needle="tab.document.getElementById('viewer').src=url;";
 if(substr_count($source,$needle)!==1){fwrite(STDERR,"STOP: PDF viewer assignment not uniquely identified.\n");exit(1);}
 $insert=<<<'JS'
         // TIMESHEET_IOS_FULL_PDF_20261114: iOS sometimes prints only iframe page 1.
