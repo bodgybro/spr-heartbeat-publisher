@@ -52,7 +52,7 @@ $count=0;
 $newHtml=preg_replace('~(timesheet/timesheet-print\.js\?v=)[A-Za-z0-9._-]+~','$1TS-IOS-2P-20261114',$html,1,$count);
 if($count!==1||!is_string($newHtml)){fwrite(STDERR,"STOP: Timesheet cache reference not uniquely identified.\n");exit(1);}
 $readerRefCount=0;
-$newHtml=preg_replace('~(\\.\\./sps/check/reader\\.js\\?v=)[A-Za-z0-9._-]+~','$1CHECK3-CLAIMACCESS-20261114',$newHtml,1,$readerRefCount);
+$newHtml=preg_replace('~(\.\./sps/check/reader\.js\?v=)[A-Za-z0-9._-]+~','$1CHECK3-CLAIMACCESS-20261114',$newHtml,1,$readerRefCount);
 if($readerRefCount!==1||!is_string($newHtml)){
   fwrite(STDERR,"STOP: Reader script cache reference not uniquely identified.\n");exit(1);
 }
