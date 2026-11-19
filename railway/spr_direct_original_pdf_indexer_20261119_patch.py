@@ -100,9 +100,14 @@ def _spr_direct_index_runtime():
             and (home/"node_modules"/"pdfjs-dist"/"package.json").is_file()
             and (home/"node_modules"/"acorn"/"package.json").is_file()):
         print("  [DIRECT INDEX RUNTIME] Installing pinned pdfjs/acorn locally",flush=True)
-        subprocess.run([npm,"install","--no-save","--no-audit","--no-fund",
+        install=subprocess.run([npm,"install","--no-save","--no-audit","--no-fund",
           "--ignore-scripts","pdfjs-dist@4.10.38","acorn@8"],
-          cwd=home,env=env,capture_output=True,text=True,timeout=210,check=True)
+          cwd=home,env=env,capture_output=True,text=True,timeout=210)
+        if install.returncode!=0:
+            print("  [DIRECT INDEX NPM ERROR] code="+str(install.returncode)+
+                  " stderr="+install.stderr[-650:].replace("\n"," ")+
+                  " stdout="+install.stdout[-250:].replace("\n"," "),flush=True)
+            raise RuntimeError("Pinned npm dependency installation failed")
         marker.write_text("pdfjs-dist@4.10.38+acorn@8\n")
     return node,script,home,env,sha
 
