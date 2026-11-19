@@ -200,13 +200,13 @@ def _spr_direct_index_one(job):
     folder="d" if role=="driver" else "g"
     label="Drivers" if role=="driver" else "Guards"
     filename="All "+label+" Combined "+date[8:10]+"_"+date[5:7]+"_"+date[:4]+".pdf"
+    print("  [DIRECT INDEX JOB] "+date+" "+role+" checking published hashes",flush=True)
     ssh,ftp,root=_spr_direct_primary_sftp()
     try:
         pdfdir=_spr_remote_subdir(root,"drivers" if role=="driver" else "guards")
         original_path=pdfdir+"/"+filename
-        original=_spr_direct_read(ftp,original_path)
-        if not original.startswith(b"%PDF") or hashlib.sha256(original).hexdigest()!=sha:
-            raise RuntimeError("Original Bodgybros PDF has changed since upload")
+        # Skip already verified dual-site indexes BEFORE downloading large PDFs.
+        # Queued SHA comes from the original upload or remote source SHA check.
         # The live proprietary parser remains in its private account directory.
         private=os.environ["CPANEL_HOME"].rstrip("/")+"/sps-private-assets/rc230-proprietary-runtime.min.js"
         engine=_spr_direct_read(ftp,private,max_bytes=6_000_000)
@@ -238,6 +238,10 @@ def _spr_direct_index_one(job):
         if primary and (secondary or not _dual_enabled()):
             print("  [DIRECT INDEX CURRENT] "+date+" "+role+" both sites source verified",flush=True)
             return
+        original=_spr_direct_read(ftp,original_path)
+        if not original.startswith(b"%PDF") or hashlib.sha256(original).hexdigest()!=sha:
+            raise RuntimeError("Original Bodgybros PDF has changed since upload")
+        print("  [DIRECT INDEX BUILD] "+date+" "+role+" verified original source",flush=True)
         node,builder,home,env,indexer_sha=_spr_direct_index_runtime()
         with tempfile.TemporaryDirectory(prefix="spr-index-",dir=str(home)) as tmp:
             work=pathlib.Path(tmp)
@@ -355,7 +359,11 @@ def _spr_direct_startup_catchup():
         finally:
             ftp.close();ssh.close()
         if jobs:
-            jobs.sort(key=lambda j:(j["date"],j["role"]))
+            # Index future releases first so Friday/Saturday or Sunday/Monday
+            # crew data is ready before its service date, then today, then past.
+            jobs.sort(key=lambda j:(0 if j["date"]>today.isoformat()
+                                    else 1 if j["date"]==today.isoformat()
+                                    else 2,j["date"],j["role"]))
             print("  [DIRECT INDEX CATCHUP] Original-SHA verified candidates="+str(len(jobs)),flush=True)
             _spr_index_background(jobs)
     except Exception as exc:
