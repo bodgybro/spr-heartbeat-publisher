@@ -126,7 +126,9 @@ def _spr_direct_primary_sftp():
     ssh.connect(hostname=host,username=username,port=int(os.environ.get("SFTP_PORT") or 22),
                 pkey=key,timeout=12,auth_timeout=12,banner_timeout=12,
                 allow_agent=False,look_for_keys=False)
-    return ssh,ssh.open_sftp(),root
+    sftp=ssh.open_sftp()
+    sftp.get_channel().settimeout(50)
+    return ssh,sftp,root
 
 def _spr_direct_read(ftp,path,max_bytes=30_000_000):
     import hashlib
@@ -293,6 +295,7 @@ def _spr_index_background(jobs):
         _SPR_INDEX_RUNNING.release()
 
 def _spr_direct_startup_catchup():
+    print("  [DIRECT INDEX CATCHUP START] scanning original uploads after 20s",flush=True)
     # One bounded recovery scan after startup so already published future PDFs
     # are not missed if the previous browser indexer timed out during upload.
     import datetime,hashlib,os,re,time
@@ -304,12 +307,15 @@ def _spr_direct_startup_catchup():
     # Release before handing date/role jobs to the normal locked worker.
     _SPR_INDEX_RUNNING.release()
     try:
+        print("  [DIRECT INDEX CATCHUP CONNECT] Opening trusted primary SFTP",flush=True)
         ssh,ftp,root=_spr_direct_primary_sftp()
+        print("  [DIRECT INDEX CATCHUP CONNECTED] Primary SFTP ready",flush=True)
         jobs=[]
         try:
             today=datetime.datetime.now(ZoneInfo("Australia/Sydney")).date()
             for role,label in (("driver","Drivers"),("guard","Guards")):
                 source=_spr_remote_subdir(root,label.lower())
+                print("  [DIRECT INDEX CATCHUP LIST] role="+role,flush=True)
                 for info in ftp.listdir_attr(source):
                     match=re.fullmatch(r"All "+label+r" Combined (\d\d)_(\d\d)_(20\d\d)\.pdf",info.filename)
                     if not match or info.st_size<1000:continue
@@ -337,6 +343,7 @@ def _spr_secondary_catchup():
     # The bounded new startup scanner handles both current and future dates.
     return None
 
+print("  [DIRECT INDEX RUNTIME] enabled="+str(os.environ.get("SPR_DIRECT_INDEXER_ENABLED","1").strip()=="1"),flush=True)
 if os.environ.get("SPR_DIRECT_INDEXER_ENABLED","1").strip()=="1":
     threading.Thread(target=_spr_direct_startup_catchup,
                      name="spr-direct-index-catchup",daemon=True).start()
