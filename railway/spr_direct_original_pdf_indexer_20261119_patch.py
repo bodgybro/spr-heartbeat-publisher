@@ -207,7 +207,7 @@ def _spr_direct_index_one(job):
                     b"SPR_RETAIN_VERSION=4",b"function prepareShiftRuntimeIndexes")):
             raise RuntimeError("Active private SPR parser build unsupported")
         engine_sha=hashlib.sha256(engine).hexdigest()
-        remote_index=pdfdir.rsplit("/",2)[0]+"/i/"+folder
+        remote_index=pdfdir.rsplit("/",1)[0]+"/i/"+folder
         # Ensure exact current indexes get skipped before expensive Node work.
         def primary_current():
             try:
