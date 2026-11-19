@@ -135,6 +135,11 @@ def _spr_direct_read(ftp,path,max_bytes=30_000_000):
     if ftp.stat(path).st_size>max_bytes:raise RuntimeError("Remote PDF/parser size cap exceeded")
     chunks=[];total=0
     with ftp.open(path,"rb") as handle:
+        # The cPanel SFTP server has substantial latency on sequential 32KiB
+        # reads. Prefetch allows concurrent verified reads, avoiding minutes
+        # of blocking on each future SPR PDF before Node can parse it.
+        try:handle.prefetch(max_concurrent_requests=32)
+        except Exception:pass
         while True:
             piece=handle.read(1024*1024)
             if not piece:break
