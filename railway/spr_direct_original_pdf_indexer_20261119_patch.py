@@ -349,7 +349,7 @@ def apply(path: Path):
     tree=ast.parse(source)
     functions={n.name for n in tree.body if isinstance(n,ast.FunctionDef)}
     required={"upload_pdf","run_update","_spr_index_background",
-              "_spr_secondary_catchup","_spr_remote_subdir","_dual_store",
+              "_spr_remote_subdir","_dual_store",
               "_dual_connection","_dual_enabled","_dual_release_connection"}
     missing=required-functions
     if missing:
