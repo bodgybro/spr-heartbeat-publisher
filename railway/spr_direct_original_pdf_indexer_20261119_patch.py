@@ -45,6 +45,12 @@ def _spr_direct_index_runtime():
         (home/"package.json").write_text('{"private":true,"type":"module"}\n')
     node=shutil.which("node")
     npm=shutil.which("npm")
+    if node and npm:
+        try:
+            version=subprocess.run([node,"--version"],capture_output=True,text=True,timeout=8,check=True)
+            major=int(version.stdout.strip().lstrip("v").split(".",1)[0])
+            if major<22:node=None;npm=None
+        except Exception:node=None;npm=None
     env=os.environ.copy()
     nodebin=home/"node-v22.15.0-linux-x64"/"bin"
     if not node or not npm:
