@@ -313,21 +313,45 @@ def _spr_direct_startup_catchup():
         jobs=[]
         try:
             today=datetime.datetime.now(ZoneInfo("Australia/Sydney")).date()
+            import shlex
+            # Never list the whole years-long SPR directory. Test only the
+            # bounded recent/future filenames, then SHA the existing sources.
             for role,label in (("driver","Drivers"),("guard","Guards")):
                 source=_spr_remote_subdir(root,label.lower())
-                print("  [DIRECT INDEX CATCHUP LIST] role="+role,flush=True)
-                for info in ftp.listdir_attr(source):
-                    match=re.fullmatch(r"All "+label+r" Combined (\d\d)_(\d\d)_(20\d\d)\.pdf",info.filename)
-                    if not match or info.st_size<1000:continue
-                    try:day=datetime.date(int(match[3]),int(match[2]),int(match[1]))
-                    except ValueError:continue
-                    if not(today-datetime.timedelta(days=3)<=day<=today+datetime.timedelta(days=30)):
+                print("  [DIRECT INDEX CATCHUP SCAN] role="+role+" dates=34",flush=True)
+                found=0
+                for offset in range(-3,31):
+                    day=today+datetime.timedelta(days=offset)
+                    filename="All "+label+" Combined "+day.strftime("%d_%m_%Y")+".pdf"
+                    source_file=source+"/"+filename
+                    try:
+                        stat=ftp.stat(source_file)
+                    except FileNotFoundError:
                         continue
-                    data=_spr_direct_read(ftp,source+"/"+info.filename)
-                    if not data.startswith(b"%PDF"):continue
+                    if stat.st_size<1000 or stat.st_size>30000000:continue
+                    digest=None
+                    try:
+                        cmd="sha256sum -- "+shlex.quote(source_file)
+                        stdin,stdout,stderr=ssh.exec_command(cmd,timeout=12)
+                        stdout.channel.settimeout(22)
+                        line=stdout.read(240).decode("ascii","replace")
+                        rc=stdout.channel.recv_exit_status()
+                        stdin.close();stdout.close();stderr.close()
+                        if rc==0 and re.match(r"^[0-9a-f]{64}  ",line):
+                            digest=line[:64]
+                    except Exception:pass
+                    if digest is None:
+                        data=_spr_direct_read(ftp,source_file)
+                        if not data.startswith(b"%PDF"):continue
+                        digest=hashlib.sha256(data).hexdigest()
                     jobs.append({"date":day.isoformat(),"role":role,
-                                 "sha":hashlib.sha256(data).hexdigest(),
+                                 "sha":digest,
                                  "site":"https://www.bodgybros.com/sps"})
+                    found+=1
+                    print("  [DIRECT INDEX CATCHUP SOURCE] role="+role+
+                          " date="+day.isoformat()+" verified=yes",flush=True)
+                print("  [DIRECT INDEX CATCHUP SCAN COMPLETE] role="+role+
+                      " available="+str(found),flush=True)
         finally:
             ftp.close();ssh.close()
         if jobs:
