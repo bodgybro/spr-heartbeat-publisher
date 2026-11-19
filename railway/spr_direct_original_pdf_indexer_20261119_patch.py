@@ -84,7 +84,9 @@ def _spr_direct_index_runtime():
                     # Only expected relative entries from the checked archive.
                     for item in tar.getmembers():
                         p=pathlib.PurePosixPath(item.name)
-                        if p.is_absolute() or ".." in p.parts or not item.name.startswith("node-v22.15.0-linux-x64/"):
+                        root_name="node-v22.15.0-linux-x64"
+                        if (p.is_absolute() or ".." in p.parts or
+                            not (item.name==root_name or item.name.startswith(root_name+"/"))):
                             raise RuntimeError("Invalid Node.js archive entry")
                     tar.extractall(home,filter="data")
             finally:
