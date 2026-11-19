@@ -202,6 +202,7 @@ def _spr_direct_index_one(job):
     filename="All "+label+" Combined "+date[8:10]+"_"+date[5:7]+"_"+date[:4]+".pdf"
     print("  [DIRECT INDEX JOB] "+date+" "+role+" checking published hashes",flush=True)
     ssh,ftp,root=_spr_direct_primary_sftp()
+    print("  [DIRECT INDEX STAGE] "+date+" "+role+" primary_connected",flush=True)
     try:
         pdfdir=_spr_remote_subdir(root,"drivers" if role=="driver" else "guards")
         original_path=pdfdir+"/"+filename
@@ -210,6 +211,7 @@ def _spr_direct_index_one(job):
         # The live proprietary parser remains in its private account directory.
         private=os.environ["CPANEL_HOME"].rstrip("/")+"/sps-private-assets/rc230-proprietary-runtime.min.js"
         engine=_spr_direct_read(ftp,private,max_bytes=6_000_000)
+        print("  [DIRECT INDEX STAGE] "+date+" "+role+" engine_read bytes="+str(len(engine)),flush=True)
         if not all(bit in engine for bit in
                    (b"SPR_PARSER_BUILD=666",b"SPR_PAGE_LAYOUT_BUILD=595",
                     b"SPR_RETAIN_VERSION=4",b"function prepareShiftRuntimeIndexes")):
@@ -224,17 +226,23 @@ def _spr_direct_index_one(job):
                 return _spr_direct_meta_good(meta,data,role,date,sha,engine_sha)
             except FileNotFoundError:return False
         primary=primary_current()
+        print("  [DIRECT INDEX STAGE] "+date+" "+role+" primary_current="+str(primary),flush=True)
         secondary=False
         if _dual_enabled():
+            print("  [DIRECT INDEX STAGE] "+date+" "+role+" kustom_connecting",flush=True)
             kssh,kftp=_dual_connection()
+            print("  [DIRECT INDEX STAGE] "+date+" "+role+" kustom_connected",flush=True)
             kpdf=_dual_rel("spr/"+folder+"/"+filename)
-            if _dual_remote_sha(kssh,kftp,kpdf)!=sha:
+            ksha=_dual_remote_sha(kssh,kftp,kpdf)
+            print("  [DIRECT INDEX STAGE] "+date+" "+role+" kustom_source_hashed",flush=True)
+            if ksha!=sha:
                 raise RuntimeError("Kustom original PDF differs; refusing split sources")
             try:
                 kmeta=_spr_direct_read(kftp,_dual_rel("spr/i/"+folder+"/"+date+".meta.json"),100000)
                 kindex=_spr_direct_read(kftp,_dual_rel("spr/i/"+folder+"/"+date+".json.gz"),18_000_000)
                 secondary=_spr_direct_meta_good(kmeta,kindex,role,date,sha,engine_sha)
             except FileNotFoundError:secondary=False
+        print("  [DIRECT INDEX STAGE] "+date+" "+role+" secondary_current="+str(secondary),flush=True)
         if primary and (secondary or not _dual_enabled()):
             print("  [DIRECT INDEX CURRENT] "+date+" "+role+" both sites source verified",flush=True)
             return
