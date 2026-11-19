@@ -24,7 +24,10 @@ EXTENSION=r'''
 # This extension is intentionally applied after all dual-site amendments.
 def _spr_direct_index_runtime():
     import base64,hashlib,os,pathlib,platform,shutil,subprocess,tarfile,urllib.request
-    home=pathlib.Path(DATA_ROOT)/"spr-direct-indexer"
+    # Keep generated Node/pdfjs modules off the 500MB persistent /data volume.
+    # They are reproducible runtime dependencies, NOT rosters or user data.
+    # npm also needs its cache and temporary files on the container disk.
+    home=pathlib.Path("/app/spr-direct-indexer")
     home.mkdir(parents=True,exist_ok=True)
     encoded=os.environ.get("SPR_DIRECT_INDEXER_JS_B64","").strip()
     sha=os.environ.get("SPR_DIRECT_INDEXER_JS_SHA256","").strip()
@@ -52,6 +55,8 @@ def _spr_direct_index_runtime():
             if major<22:node=None;npm=None
         except Exception:node=None;npm=None
     env=os.environ.copy()
+    env["TMPDIR"]="/tmp"
+    env["npm_config_cache"]="/tmp/spr-direct-indexer-npm-cache"
     nodebin=home/"node-v22.15.0-linux-x64"/"bin"
     if not node or not npm:
         if platform.machine() not in ("x86_64","amd64"):
