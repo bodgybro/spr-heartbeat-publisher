@@ -114,6 +114,25 @@ def _spr_direct_index_runtime():
                   " stdout="+install.stdout[-250:].replace("\n"," "),flush=True)
             raise RuntimeError("Pinned npm dependency installation failed")
         marker.write_text("pdfjs-dist@4.10.38+acorn@8\n")
+    # Safely retire ONLY our previous, verified generated Node cache from the
+    # small /data volume. Never traverse symlinks or remove user/roster data.
+    legacy=pathlib.Path(DATA_ROOT)/"spr-direct-indexer"
+    if legacy.is_dir() and not legacy.is_symlink():
+        legacy_script=legacy/"rc186-build-real-spr-index.mjs"
+        permitted={"rc186-build-real-spr-index.mjs","package.json",
+                   "package-lock.json","node_modules",
+                   "node-v22.15.0-linux-x64",".verified-dependencies"}
+        try:
+            names={p.name for p in legacy.iterdir()}
+            if (legacy_script.is_file() and not legacy_script.is_symlink()
+                and hashlib.sha256(legacy_script.read_bytes()).hexdigest()==sha
+                and names.issubset(permitted)):
+                shutil.rmtree(legacy)
+                print("  [DIRECT INDEX STORAGE] Retired only verified obsolete generated Node cache",flush=True)
+            else:
+                print("  [DIRECT INDEX STORAGE] Previous cache not automatically removed; ownership check failed",flush=True)
+        except Exception as exc:
+            print("  [DIRECT INDEX STORAGE] Private-cache cleanup skipped: "+type(exc).__name__,flush=True)
     return node,script,home,env,sha
 
 def _spr_direct_primary_sftp():
