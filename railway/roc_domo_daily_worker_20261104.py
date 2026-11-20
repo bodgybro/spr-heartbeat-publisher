@@ -374,7 +374,7 @@ def safe_process(browser, functions):
             return process(browser, functions)
         except Exception as exc:
             # Do not log private records, credentials or SharePoint URLs.
-            message = re.sub(r"https?://\\S+", "[SharePoint URL]", str(exc))
+            message = re.sub(r"https?://\S+", "[SharePoint URL]", str(exc))
             low = message.lower()
             retryable = any(token in low for token in (
                 "error reading ssh protocol banner", "connection reset by peer",
