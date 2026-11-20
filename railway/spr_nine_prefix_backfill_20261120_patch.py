@@ -59,9 +59,6 @@ def _spr_nine_prefix_backfill():
         resolved=[]
         for date,role,path,length in jobs:
             checkpoint=marker_dir/(date+"-"+role+"-"+version[:16]+".done")
-            if checkpoint.is_file():
-                resolved.append((date,role,None,checkpoint))
-                continue
             cmd="sha256sum -- "+_np_shlex.quote(path)
             stdin,stdout,stderr=ssh.exec_command(cmd,timeout=20)
             stdout.channel.settimeout(45)
@@ -70,7 +67,11 @@ def _spr_nine_prefix_backfill():
             stdin.close();stdout.close();stderr.close()
             if rc!=0 or not _np_re.match(r"^[a-f0-9]{64}  ",line):
                 raise RuntimeError("Original PDF checksum command failed "+date+" "+role)
-            resolved.append((date,role,line[:64],checkpoint))
+            sha=line[:64]
+            if checkpoint.is_file() and checkpoint.read_text(encoding="ascii").strip()==sha:
+                resolved.append((date,role,None,checkpoint))
+            else:
+                resolved.append((date,role,sha,checkpoint))
         print("[SPR NINE PREFIX SOURCE HASHES] verified="+str(len(resolved)),flush=True)
     except Exception as exc:
         print("[SPR NINE PREFIX DISCOVERY_FAILED] "+type(exc).__name__+" "+
@@ -123,7 +124,8 @@ def _spr_nine_prefix_backfill():
         print("[SPR NINE PREFIX ALL_SOURCE_INDEXES_COMPLETE] count="+str(len(resolved)),
               flush=True)
 
-if _np_os.environ.get("SPR_NINE_PREFIX_BACKFILL_ENABLED","1").strip()=="1":
+import os as _np_nine_backfill_os
+if _np_nine_backfill_os.environ.get("SPR_NINE_PREFIX_BACKFILL_ENABLED","1").strip()=="1":
     threading.Thread(target=_spr_nine_prefix_backfill,
                      name="spr-all-nine-prefix-backfill",daemon=True).start()
 '''
