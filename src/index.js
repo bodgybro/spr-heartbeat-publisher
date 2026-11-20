@@ -136,7 +136,7 @@ async function queueCommand(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ok:false,error:"invalid_json"},400); }
   const command = String(body?.command || "").toLowerCase();
-  if (!["spr","rosters"].includes(command)) return json({ok:false,error:"invalid_command"},400);
+  if (!["spr","rosters","roc"].includes(command)) return json({ok:false,error:"invalid_command"},400);
   const existing = await env.SPR_COMMANDS.get("pending");
   if (existing) return json({ok:false,error:"busy"},409);
   const item = { id: crypto.randomUUID(), command, created_at: Math.floor(Date.now()/1000) };
@@ -265,7 +265,7 @@ async function recordSuccess(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ok:false,error:"invalid_json"},400); }
   const command = String(body?.command || "").toLowerCase();
-  if (!["spr","rosters"].includes(command)) return json({ok:false,error:"invalid_command"},400);
+  if (!["spr","rosters","roc"].includes(command)) return json({ok:false,error:"invalid_command"},400);
   const completedAt = Number(body?.completed_at || Math.floor(Date.now()/1000));
   await env.SPR_COMMANDS.put("last_success:" + command, String(completedAt));
   invalidateStatusCache();
@@ -286,7 +286,7 @@ async function ackCommand(request, env) {
     }
   }
   const completedAt = Math.floor(Date.now()/1000);
-  if (Boolean(body?.ok) && ["spr","rosters"].includes(completedCommand)) {
+  if (Boolean(body?.ok) && ["spr","rosters","roc"].includes(completedCommand)) {
     await env.SPR_COMMANDS.put("last_success:" + completedCommand, String(completedAt));
   }
   invalidateStatusCache();
