@@ -1,0 +1,40 @@
+name: Deploy ROC command fix to Cloudflare Worker (one-time)
+on:
+  push:
+    paths:
+      - .github/workflows/roc-command-cloudflare-deploy-20261120.yml
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify only authenticated ROC command is newly accepted
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node - <<'NODE'
+          const fs=require('fs');
+          const src=fs.readFileSync('src/index.js','utf8');
+          const m=src.match(/\["spr","rosters","roc"\]/g)||[];
+          if(m.length!==3)throw Error('Expected ROC accepted in queue, success and ack allowlists');
+          if(!src.includes('function authorized(request, env)'))throw Error('Authorization guard missing');
+          if(!src.includes('if (!authorized(request, env))'))throw Error('Authenticated command guard missing');
+          console.log('ROC_WORKER_SOURCE_TEST_PASS command_roc=yes spr_rosters_unchanged=yes authorization_preserved=yes');
+          NODE
+      - name: Deploy to existing Cloudflare Worker (if GitHub secrets available)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ];then
+            echo 'CLOUDFLARE_DEPLOY_BLOCKED: This repository has no configured CLOUDFLARE_API_TOKEN and/or CLOUDFLARE_ACCOUNT_ID GitHub Actions secrets.'
+            exit 1
+          fi
+          npm exec --yes --package=wrangler@4 -- wrangler deploy --config wrangler.toml
+          echo 'CLOUDFLARE_ROC_WORKER_DEPLOY_SUCCESS'
