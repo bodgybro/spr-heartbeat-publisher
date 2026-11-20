@@ -37,24 +37,27 @@ def _spr_nine_prefix_backfill():
         version=_np_hashlib.sha256(original).hexdigest()
         for role,label in (("driver","Drivers"),("guard","Guards")):
             folder=_spr_remote_subdir(root,label.lower())
-            pattern=_np_re.compile(
-                r"^All "+label+r" Combined (\d{2})_(\d{2})_(20\d{2})\.pdf$")
-            for filename in ftp.listdir(folder):
-                match=pattern.fullmatch(filename)
+            idx_folder=folder.rsplit("/",1)[0]+"/i/"+("d" if role=="driver" else "g")
+            # Rebuild all PREPARED dated SPR source indexes. The original
+            # archive also includes older PDFs without prepared indexes:
+            # do not unexpectedly generate hundreds of historical indexes.
+            pattern=_np_re.compile(r"^(20\d{2}-\d{2}-\d{2})\.json\.gz$")
+            for index_name in ftp.listdir(idx_folder):
+                match=pattern.fullmatch(index_name)
                 if not match:continue
-                dd,mm,yyyy=match.groups()
-                date=yyyy+"-"+mm+"-"+dd
+                date=match.group(1)
                 try:
                     if _np_datetime.date.fromisoformat(date).isoformat()!=date:continue
                 except ValueError:continue
+                filename="All "+label+" Combined "+date[8:10]+"_"+date[5:7]+"_"+date[:4]+".pdf"
                 path=folder+"/"+filename
                 st=ftp.stat(path)
                 if st.st_size<1000 or st.st_size>30_000_000:continue
                 jobs.append((date,role,path,st.st_size))
         jobs.sort(key=lambda j:(j[0],j[1]),reverse=True)
-        if not jobs or len(jobs)>150:
+        if not jobs or len(jobs)>100:
             raise RuntimeError("Unexpected date scope for all-source SPR reindex: "+str(len(jobs)))
-        print("[SPR NINE PREFIX INVENTORY] dated_source_pairs="+str(len(jobs))+
+        print("[SPR NINE PREFIX INVENTORY] prepared_index_pairs="+str(len(jobs))+
               " primary_parser_sha="+version[:14],flush=True)
         resolved=[]
         for date,role,path,length in jobs:
