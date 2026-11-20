@@ -367,11 +367,29 @@ def process(browser, functions, target_date=None):
 
 
 def safe_process(browser, functions):
-    try:
-        return process(browser, functions)
-    except Exception as exc:
-        # No private incident records or credentials should be included.
-        text = str(exc)
-        text = re.sub(r"https?://\S+", "[SharePoint URL]", text)
-        _say("NOT COMPLETE: " + text[:230])
-        return False
+    """Retry only temporary SSH/SFTP transport failures, not invalid reports."""
+    import time
+    for attempt in range(3):
+        try:
+            return process(browser, functions)
+        except Exception as exc:
+            # Do not log private records, credentials or SharePoint URLs.
+            message = re.sub(r"https?://\\S+", "[SharePoint URL]", str(exc))
+            low = message.lower()
+            retryable = any(token in low for token in (
+                "error reading ssh protocol banner", "connection reset by peer",
+                "socket is closed", "connection aborted", "eoferror",
+                "connection timed out", "ssh_exception"))
+            if retryable and attempt < 2:
+                _say("Temporary SSH/SFTP connection failure; retry " +
+                     str(attempt + 2) + "/3")
+                release = functions.get("_roster_sftp_release")
+                if callable(release):
+                    try:
+                        release()
+                    except Exception:
+                        pass
+                time.sleep(5 * (attempt + 1))
+                continue
+            _say("NOT COMPLETE: " + message[:230])
+            return False
