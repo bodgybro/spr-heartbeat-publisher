@@ -1,8 +1,6 @@
 name: Deploy ROC command fix to Cloudflare Worker (one-time)
 on:
-  push:
-    paths:
-      - .github/workflows/roc-command-cloudflare-deploy-20261120.yml
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
