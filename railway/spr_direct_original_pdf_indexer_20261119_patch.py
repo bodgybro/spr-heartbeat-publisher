@@ -186,6 +186,7 @@ def _spr_direct_meta_good(meta_bytes,index_bytes,role,date,sha,engine_sha):
         return (m.get("ok") is True and m.get("date")==date and m.get("role")==role
                 and m.get("sourceSha")==sha and m.get("indexerEngineSha256")==engine_sha
                 and m.get("parserBuild")==666 and m.get("pageLayoutBuild")==595
+                and m.get("vectorDividerVersion")==1
                 and m.get("compressedBytes")==len(index_bytes) and len(index_bytes)>100)
     except Exception:return False
 
@@ -196,7 +197,11 @@ def _spr_direct_verify_built(gz,meta,role,date,sha,engine_sha):
     if not (_spr_direct_meta_good(json.dumps(info).encode(),raw,role,date,sha,engine_sha)
             and decoded.get("sourceSha")==sha and decoded.get("date")==date
             and decoded.get("role")==role and decoded.get("parserBuild")==666
-            and decoded.get("pageLayoutBuild")==595 and len(decoded.get("pages",[]))>40
+            and decoded.get("pageLayoutBuild")==595
+            and decoded.get("vectorDividerVersion")==1
+            and len(decoded.get("pages",[]))>40
+            and all(isinstance(pg.get("dividerXs"),list) and len(pg["dividerXs"])==3
+                    for pg in decoded.get("pages",[]))
             and len(decoded.get("records",[]))>20 and len(decoded.get("shifts",[]))>10):
         raise RuntimeError("Original-PDF index failed exact source/date/parser checks")
     return raw,json.dumps(info,separators=(",",":")).encode("utf-8"),len(decoded["records"]),len(decoded["shifts"])
@@ -248,10 +253,32 @@ def _spr_direct_index_one(job):
         private=os.environ["CPANEL_HOME"].rstrip("/")+"/sps-private-assets/rc230-proprietary-runtime.min.js"
         engine=_spr_direct_read(ftp,private,max_bytes=6_000_000)
         print("  [DIRECT INDEX STAGE] "+date+" "+role+" engine_read bytes="+str(len(engine)),flush=True)
-        if not all(bit in engine for bit in
-                   (b"SPR_PARSER_BUILD=666",b"SPR_PAGE_LAYOUT_BUILD=595",
-                    b"SPR_RETAIN_VERSION=4",b"function prepareShiftRuntimeIndexes")):
-            raise RuntimeError("Active private SPR parser build unsupported")
+        # The active engine is trusted from the primary private path, but
+        # literal byte substring checks wrongly reject valid JS formatting.
+        # Validate exact declared versions and every required vector parser
+        # function; the Node builder also verifies AST and real-PDF output.
+        parser_text=engine.decode("utf-8")
+        mismatches=[]
+        for name,want in (("SPR_PARSER_BUILD",666),
+                          ("SPR_PAGE_LAYOUT_BUILD",595),
+                          ("SPR_RETAIN_VERSION",4)):
+            found=re.search(r"\b(?:const|let|var)\s+"+re.escape(name)+
+                            r"\s*=\s*(\d+)\s*;",parser_text)
+            if not found or int(found.group(1))!=want:
+                mismatches.append(name)
+        for name in ("rc242DrawnVerticalDividers",
+                     "rc242DocumentDividerTemplate",
+                     "rc242VerifiedPageDividers",
+                     "reconstructSprLines","sprPagesMatchRole",
+                     "interpretDocument","buildShiftSummaries",
+                     "prepareShiftRuntimeIndexes",
+                     "sprEncodeRetainedIndex","sprDecodeRetainedIndex",
+                     "rc175OutgoingPlace"):
+            if not re.search(r"\bfunction\s+"+re.escape(name)+r"\s*\(",parser_text):
+                mismatches.append(name)
+        if mismatches:
+            raise RuntimeError("Active private SPR parser incompatible: "+
+                               ",".join(mismatches[:8]))
         engine_sha=hashlib.sha256(engine).hexdigest()
         remote_index=pdfdir.rsplit("/",1)[0]+"/i/"+folder
         # Ensure exact current indexes get skipped before expensive Node work.
