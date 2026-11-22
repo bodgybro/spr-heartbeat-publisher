@@ -204,17 +204,43 @@ def _spr_direct_verify_built(gz,meta,role,date,sha,engine_sha):
     import gzip,json
     raw=gz.read_bytes();info=json.loads(meta.read_text())
     decoded=json.loads(gzip.decompress(raw))
-    if not (_spr_direct_meta_good(json.dumps(info).encode(),raw,role,date,sha,engine_sha)
-            and decoded.get("sourceSha")==sha and decoded.get("date")==date
-            and decoded.get("role")==role and decoded.get("parserBuild")==666
-            and decoded.get("pageLayoutBuild")==595
-            and decoded.get("vectorDividerVersion")==1
-            and len(decoded.get("pages",[]))>40
-            and all(isinstance(pg.get("dividerXs"),list) and len(pg["dividerXs"])==3
-                    for pg in decoded.get("pages",[]))
-            and len(decoded.get("records",[]))>20 and len(decoded.get("shifts",[]))>10):
+    pages=decoded.get("pages",[])
+    records=decoded.get("records",[])
+    shifts=decoded.get("shifts",[])
+    invalid_divider_pages=[
+        pg.get("pageNo",i+1) for i,pg in enumerate(pages)
+        if not isinstance(pg.get("dividerXs"),list) or len(pg["dividerXs"])!=3
+    ]
+    checks={
+        "meta_ok":info.get("ok") is True,
+        "meta_date":info.get("date")==date,
+        "meta_role":info.get("role")==role,
+        "meta_sha":info.get("sourceSha")==sha,
+        "meta_engine":info.get("indexerEngineSha256")==engine_sha,
+        "meta_parser":info.get("parserBuild")==666,
+        "meta_layout":info.get("pageLayoutBuild")==595,
+        "meta_vector":info.get("vectorDividerVersion")==1,
+        "meta_bytes":info.get("compressedBytes")==len(raw) and len(raw)>100,
+        "pdf_sha":decoded.get("sourceSha")==sha,
+        "date":decoded.get("date")==date,
+        "role":decoded.get("role")==role,
+        "parser":decoded.get("parserBuild")==666,
+        "layout":decoded.get("pageLayoutBuild")==595,
+        "vector":decoded.get("vectorDividerVersion")==1,
+        "page_count":len(pages)>40,
+        "dividers":not invalid_divider_pages,
+        "record_count":len(records)>20,
+        "shift_count":len(shifts)>10,
+    }
+    if not all(checks.values()):
+        failed=",".join(key for key,ok in checks.items() if not ok)
+        print("  [DIRECT INDEX REJECT PROOF] date="+date+" role="+role+
+              " checks="+failed+" pages="+str(len(pages))+
+              " records="+str(len(records))+" shifts="+str(len(shifts))+
+              " divider_page_count="+str(len(invalid_divider_pages))+
+              " divider_page_samples="+str(invalid_divider_pages[:8]),flush=True)
         raise RuntimeError("Original-PDF index failed exact source/date/parser checks")
-    return raw,json.dumps(info,separators=(",",":")).encode("utf-8"),len(decoded["records"]),len(decoded["shifts"])
+    return raw,json.dumps(info,separators=(",",":")).encode("utf-8"),len(records),len(shifts)
 
 def _spr_direct_primary_publish(ftp,folder,date,gz,meta):
     import hashlib,os
