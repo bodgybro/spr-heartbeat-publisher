@@ -234,11 +234,21 @@ def _spr_direct_verify_built(gz,meta,role,date,sha,engine_sha):
     }
     if not all(checks.values()):
         failed=",".join(key for key,ok in checks.items() if not ok)
+        sample=[]
+        for pg in pages:
+            if len(sample)>=8:break
+            if pg.get("pageNo") not in invalid_divider_pages:continue
+            lines=pg.get("lines",[])
+            div=pg.get("dividerXs")
+            sample.append({"page":pg.get("pageNo"),
+                "divider_len":len(div) if isinstance(div,list) else None,
+                "line_count":len(lines) if isinstance(lines,list) else None,
+                "text_chars":len(pg.get("text",""))})
         print("  [DIRECT INDEX REJECT PROOF] date="+date+" role="+role+
               " checks="+failed+" pages="+str(len(pages))+
               " records="+str(len(records))+" shifts="+str(len(shifts))+
               " divider_page_count="+str(len(invalid_divider_pages))+
-              " divider_page_samples="+str(invalid_divider_pages[:8]),flush=True)
+              " safe_page_metrics="+str(sample),flush=True)
         raise RuntimeError("Original-PDF index failed exact source/date/parser checks")
     return raw,json.dumps(info,separators=(",",":")).encode("utf-8"),len(records),len(shifts)
 
