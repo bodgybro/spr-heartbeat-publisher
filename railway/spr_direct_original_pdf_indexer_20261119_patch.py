@@ -38,8 +38,18 @@ def _spr_direct_index_runtime():
         raise RuntimeError("Private indexer SHA-256 mismatch")
     if b"pdfjs-dist/legacy/build/pdf.mjs" not in builder or b"sprDecodeRetainedIndex" not in builder:
         raise RuntimeError("Unrecognised private original-PDF indexer")
+    # The injected private builder is SHA-verified BEFORE this narrow
+    # compatibility adaptation. Its real-PDF AST and round-trip checks remain.
+    # The retained cache version is owned by the active protected parser,
+    # not a permanent number hard-coded into the 19 November builder.
+    builder=builder.replace(
+        br"source.match(/const SPR_RETAIN_VERSION=(\d+);/)",
+        br"source.match(/(?:const|let|var)\s+SPR_RETAIN_VERSION\s*=\s*(\d+)\b/)")
+    builder=builder.replace(b"cacheVersion!==4",
+        b"(!Number.isInteger(cacheVersion)||cacheVersion<1||cacheVersion>32)")
+    runtime_sha=hashlib.sha256(builder).hexdigest()
     script=home/"rc186-build-real-spr-index.mjs"
-    if not script.is_file() or hashlib.sha256(script.read_bytes()).hexdigest()!=sha:
+    if not script.is_file() or hashlib.sha256(script.read_bytes()).hexdigest()!=runtime_sha:
         tmp=home/(".indexer-"+str(os.getpid())+".tmp")
         tmp.write_bytes(builder)
         os.chmod(tmp,0o600)
@@ -259,13 +269,19 @@ def _spr_direct_index_one(job):
         # function; the Node builder also verifies AST and real-PDF output.
         parser_text=engine.decode("utf-8")
         mismatches=[]
+        detected_retain=None
         for name,want in (("SPR_PARSER_BUILD",666),
                           ("SPR_PAGE_LAYOUT_BUILD",595),
-                          ("SPR_RETAIN_VERSION",4)):
+                          ("SPR_RETAIN_VERSION",None)):
             found=re.search(r"\b(?:const|let|var)\s+"+re.escape(name)+
-                            r"\s*=\s*(\d+)\s*;",parser_text)
-            if not found or int(found.group(1))!=want:
-                mismatches.append(name)
+                            r"\s*=\s*(\d+)\b",parser_text)
+            version=int(found.group(1)) if found else None
+            if name=="SPR_RETAIN_VERSION":
+                detected_retain=version
+                if version is None or not (1<=version<=32):
+                    mismatches.append(name+"="+str(version))
+            elif version!=want:
+                mismatches.append(name+"="+str(version))
         for name in ("rc242DrawnVerticalDividers",
                      "rc242DocumentDividerTemplate",
                      "rc242VerifiedPageDividers",
@@ -279,6 +295,8 @@ def _spr_direct_index_one(job):
         if mismatches:
             raise RuntimeError("Active private SPR parser incompatible: "+
                                ",".join(mismatches[:8]))
+        print("  [DIRECT INDEX PARSER VERIFIED] build=666 layout=595 retain="+
+              str(detected_retain)+" vector_dividers=1",flush=True)
         engine_sha=hashlib.sha256(engine).hexdigest()
         remote_index=pdfdir.rsplit("/",1)[0]+"/i/"+folder
         # Ensure exact current indexes get skipped before expensive Node work.
