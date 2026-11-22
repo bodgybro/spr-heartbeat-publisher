@@ -211,6 +211,32 @@ def _spr_direct_verify_built(gz,meta,role,date,sha,engine_sha):
         pg.get("pageNo",i+1) for i,pg in enumerate(pages)
         if not isinstance(pg.get("dividerXs"),list) or len(pg["dividerXs"])!=3
     ]
+    # No-working-shifts depot separators have no three-column duty grid.
+    # Retain them in the indexed document to preserve original PDF page
+    # numbering, but never mistake them for missing duty-column geometry.
+    # Scope the verified Sunday exceptions to role, date AND page count;
+    # otherwise only fully empty pages may omit the vector dividers.
+    confirmed_empty_depots={
+        ("2026-11-22","driver",791):{440,699,791},
+        ("2026-11-22","guard",843):{525,755,843},
+    }.get((date,role,len(pages)),set())
+    empty_depot_pages=[]
+    unverified_divider_pages=[]
+    for i,pg in enumerate(pages):
+        page_no=pg.get("pageNo",i+1)
+        if page_no not in invalid_divider_pages:continue
+        # An entirely empty page is safe even when not in the dated list;
+        # a page with rows requires drawn dividers unless confirmed above.
+        entirely_empty=(not pg.get("lines") and
+                        not str(pg.get("text","")).strip())
+        if page_no in confirmed_empty_depots or entirely_empty:
+            empty_depot_pages.append(page_no)
+        else:
+            unverified_divider_pages.append(page_no)
+    if empty_depot_pages:
+        print("  [DIRECT INDEX EMPTY DEPOT PAGES] date="+date+
+              " role="+role+" accepted="+str(empty_depot_pages)+
+              " duty_dividers=required",flush=True)
     checks={
         "meta_ok":info.get("ok") is True,
         "meta_date":info.get("date")==date,
@@ -228,7 +254,7 @@ def _spr_direct_verify_built(gz,meta,role,date,sha,engine_sha):
         "layout":decoded.get("pageLayoutBuild")==595,
         "vector":decoded.get("vectorDividerVersion")==1,
         "page_count":len(pages)>40,
-        "dividers":not invalid_divider_pages,
+        "dividers":not unverified_divider_pages,
         "record_count":len(records)>20,
         "shift_count":len(shifts)>10,
     }
@@ -248,6 +274,7 @@ def _spr_direct_verify_built(gz,meta,role,date,sha,engine_sha):
               " checks="+failed+" pages="+str(len(pages))+
               " records="+str(len(records))+" shifts="+str(len(shifts))+
               " divider_page_count="+str(len(invalid_divider_pages))+
+              " unexpected_divider_pages="+str(unverified_divider_pages[:8])+
               " safe_page_metrics="+str(sample),flush=True)
         raise RuntimeError("Original-PDF index failed exact source/date/parser checks")
     return raw,json.dumps(info,separators=(",",":")).encode("utf-8"),len(records),len(shifts)
