@@ -387,6 +387,14 @@ def _spr_direct_index_one(job):
                 secondary=_spr_direct_meta_good(kmeta,kindex,role,date,sha,engine_sha)
             except FileNotFoundError:secondary=False
         print("  [DIRECT INDEX STAGE] "+date+" "+role+" secondary_current="+str(secondary),flush=True)
+        # One-time explicit rebuild to prove 23 Nov uses strict vector dividers.
+        # The marker is persisted only after both sites receive verified output.
+        force_marker=pathlib.Path("/data/.spr-vector-23nov-reindex-"+role+"-v1")
+        force_rebuild=(date=="2026-11-23" and not force_marker.exists())
+        if force_rebuild:
+            print("  [DIRECT INDEX FORCED VECTOR REBUILD] "+date+" "+role+" ignoring current index hashes",flush=True)
+            primary=False
+            secondary=False
         if primary and (secondary or not _dual_enabled()):
             print("  [DIRECT INDEX CURRENT] "+date+" "+role+" both sites source verified",flush=True)
             return
@@ -420,6 +428,8 @@ def _spr_direct_index_one(job):
             if _dual_enabled() and not secondary:
                 _dual_store("spr/i/"+folder+"/"+date+".json.gz",compressed)
                 _dual_store("spr/i/"+folder+"/"+date+".meta.json",sidecar)
+            if force_rebuild and (not _dual_enabled() or kftp is not None):
+                force_marker.write_text("verified vector-only rebuild on both sites\\n")
             print("  [DIRECT INDEX VERIFIED] "+date+" "+role+
                   " records="+str(records)+" shifts="+str(shifts)+
                   " primary="+str(not primary)+" mirror="+str(_dual_enabled() and not secondary),
