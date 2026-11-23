@@ -144,7 +144,7 @@ def apply(path:Path):
     expected={"upload_cached_roster_pdf","_roster_valid_cache_path","_spr_direct_primary_sftp","_dual_kustom_open"}
     if not expected.issubset(names):
         raise RuntimeError("Verified dual-site roster/SFTP pipeline absent: "+str(sorted(expected-names)))
-    if "# DUAL_SITE_SFTP" not in source and "# DUAL" not in source:
+    if not any(marker in source for marker in ("# SPR_DUAL_SITE_INDEPENDENT_SFTP_20261103", "# DUAL_SITE_SFTP")):
         raise RuntimeError("Verified dual-site patch marker absent")
     mains=[x for x in tree.body if isinstance(x,ast.If) and
            "__name__" in (ast.get_source_segment(source,x.test) or "")]
