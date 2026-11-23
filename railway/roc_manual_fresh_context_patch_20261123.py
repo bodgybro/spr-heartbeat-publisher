@@ -22,7 +22,7 @@ def apply(path):
         "def _roc_manual_check():",
         "with SHAREPOINT_BROWSE_LOCK:",
         "def _spr_recovery_roc_success():",
-        "_spr_recovery_roc_success()",
+        "    _spr_recovery_roc_success()",
     ):
         if src.count(required) != 1:
             raise RuntimeError("Missing unique deployed ROC hook: " + required)
