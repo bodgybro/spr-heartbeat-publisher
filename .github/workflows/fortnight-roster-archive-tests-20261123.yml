@@ -1,0 +1,20 @@
+name: Test protected Sunday-fortnight roster archives
+on:
+  push:
+    paths:
+      - .github/workflows/fortnight-roster-archive-tests-20261123.yml
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify PDF header dates, SHA-preserving private copies and live updater compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install -q pypdf reportlab
+          python3 -m py_compile railway/roster_fortnight_private_archive_20261123_patch.py
+          python3 railway/roster_fortnight_private_archive_20261123_test.py
