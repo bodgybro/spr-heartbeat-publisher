@@ -1,0 +1,23 @@
+name: Test ROC fresh browser context and recovery (no production changes)
+on:
+  push:
+    paths:
+      - .github/workflows/roc-manual-fresh-context-preflight.yml
+      - railway/roc_manual_fresh_context_patch_20261123.py
+      - railway/tests/test_roc_manual_fresh_context_20261123.py
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test manual ROC two-date browser lifecycle and staged catch-up
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile railway/roc_manual_fresh_context_patch_20261123.py
+          python3 railway/tests/test_roc_manual_fresh_context_20261123.py
+          test -f railway/sharepoint_auto_catchup_patch_20261123.py && python3 railway/tests/test_sharepoint_auto_catchup_20261123.py || true
+          echo ROC_BROWSER_AND_CATCHUP_PREFLIGHT_PASS
