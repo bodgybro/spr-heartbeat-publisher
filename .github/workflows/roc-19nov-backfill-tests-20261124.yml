@@ -1,0 +1,28 @@
+name: Test ROC 19 November exact-date backfill
+on:
+  push:
+    paths:
+      - .github/workflows/roc-19nov-backfill-tests-20261124.yml
+      - railway/roc_backfill_20261119_patch.py
+      - railway/tests/test_roc_backfill_20261119.py
+permissions:
+  contents: write
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run offline date and SHA-protected pipeline tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile railway/roc_backfill_20261119_patch.py
+          python3 railway/tests/test_roc_backfill_20261119.py
+          mkdir -p audits
+          printf '%s\n' 'ROC_19NOV_BACKFILL_TEST_PASS' 'single date=2026-11-19' 'schedules unchanged' 'verified publisher required' > audits/roc-backfill-19nov-test.txt
+          git config user.name "SPR Search tests"
+          git config user.email "spr-search-tests@users.noreply.github.com"
+          git add audits/roc-backfill-19nov-test.txt
+          git commit -m "Record passing isolated 19 November ROC backfill tests" || true
+          git push origin "HEAD:$GITHUB_REF_NAME"
