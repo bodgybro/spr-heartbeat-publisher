@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 ROOT=Path(__file__).resolve().parents[1]
 PATCH=ROOT/"roc_manual_fresh_context_patch_20261123.py"
-BASE=ROOT.parent/"patch_railway_roc.py"
+BASE=ROOT/"tests/roc_manual_deployed_fixture_20261123.py"
 
 def fixture():
     helper=runpy.run_path(str(BASE))["HELPER"]
