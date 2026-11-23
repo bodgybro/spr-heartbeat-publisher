@@ -20,12 +20,13 @@ def apply(path):
     for required in (
         "# ROC_MANUAL_COMMAND_20261114_V1",
         "def _roc_manual_check():",
-        "with SHAREPOINT_BROWSE_LOCK:",
         "def _spr_recovery_roc_success():",
         "    _spr_recovery_roc_success()",
     ):
         if src.count(required) != 1:
             raise RuntimeError("Missing unique deployed ROC hook: " + required)
+    # Existing SPR and roster functions also use this mutex. The ROC
+    # function-scoped check below is the only valid uniqueness constraint.
     tree = ast.parse(src)
     matches = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == "_roc_manual_check"]
