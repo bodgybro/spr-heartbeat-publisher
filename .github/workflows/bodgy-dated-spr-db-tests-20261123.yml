@@ -1,0 +1,17 @@
+name: Test Bodgybros independent dated-SPR SQLite importer
+on:
+  push:
+    paths:
+      - .github/workflows/bodgy-dated-spr-db-tests-20261123.yml
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate patch source, synthetic upstream runtime and host isolation
+        run: |
+          set -euo pipefail
+          python3 -m py_compile railway/bodgy_dated_spr_sqlite_parity_20261123_patch.py
+          python3 railway/bodgy_dated_spr_sqlite_parity_20261123_test.py
