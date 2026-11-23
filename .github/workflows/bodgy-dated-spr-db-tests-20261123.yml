@@ -1,4 +1,4 @@
-name: Test Bodgybros independent dated-SPR SQLite importer
+name: Verify Bodgybros independent dated-SPR importer with stubbed threads
 on:
   push:
     paths:
