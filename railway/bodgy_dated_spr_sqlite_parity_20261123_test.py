@@ -5,8 +5,7 @@ import tempfile,ast,types,threading
 import sys
 sys.path.insert(0,str(Path(__file__).parent))
 from bodgy_dated_spr_sqlite_parity_20261123_patch import apply,MARKER
-BASE='''import threading
-# KUSTOM_DATED_SPR_SQLITE_20261120_V1
+BASE='''# KUSTOM_DATED_SPR_SQLITE_20261120_V1
 calls=[]
 def _spr_db_kustom_remote(args):calls.append(("kustom",args))
 def _spr_db_kustom_scheduled_retry():pass
