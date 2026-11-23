@@ -8,7 +8,7 @@ spec=importlib.util.spec_from_file_location("archive_patch",str(Path(__file__).w
 module=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 BASE="""
-# DUAL_SITE_SFTP VERIFIED
+# SPR_DUAL_SITE_INDEPENDENT_SFTP_20261103 VERIFIED
 saved=[]
 def _roster_valid_cache_path(path):return path.split("/")
 def _spr_direct_primary_sftp():return MockSSH("bodgy"),MockFTP(),"/home11/bodgybro/public_html/sps"
