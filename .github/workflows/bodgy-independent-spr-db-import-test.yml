@@ -1,0 +1,19 @@
+name: Test independent Bodgybros SPR SQLite updater alongside Kustom
+on:
+  push:
+    paths:
+      - .github/workflows/bodgy-independent-spr-db-import-test.yml
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate isolated dual-site periodic and indexed SPR database importer
+        run: |
+          set -euo pipefail
+          python3 -m py_compile railway/bodgy_spr_db_parallel_import_patch_20261123.py
+          python3 -m py_compile railway/tests/test_bodgy_spr_db_parallel_import_20261123.py
+          python3 railway/tests/test_bodgy_spr_db_parallel_import_20261123.py
