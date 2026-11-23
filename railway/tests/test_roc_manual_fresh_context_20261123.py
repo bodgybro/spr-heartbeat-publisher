@@ -27,6 +27,9 @@ def fixture():
             "import os\n"
             "from threading import Lock\n"
             "SHAREPOINT_BROWSE_LOCK=Lock()\n"
+            "def _unrelated_spr_job():\n"
+            "    with SHAREPOINT_BROWSE_LOCK:\n"
+            "        return True\n"
             "def _spr_recovery_roc_success():pass\n"+
             helper+"\n")
 
@@ -112,6 +115,7 @@ def main():
         subprocess.run([sys.executable,"-m","py_compile",str(path)],check=True)
         src=path.read_text()
         assert src.count('def _roc_manual_check():')==1
+        assert src.count("with SHAREPOINT_BROWSE_LOCK:")==2, "Unrelated updater mutex must be left intact"
         assert src.count('_record_online_success("roc")')==1
         assert src.count('    _spr_recovery_roc_success()')==1
         assert src.count('for report_date in targets:')==1
