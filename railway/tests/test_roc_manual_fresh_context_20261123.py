@@ -85,6 +85,8 @@ def new_runtime(script, failure_mode=None):
         "SHAREPOINT_BROWSE_LOCK":threading.Lock(),
     })
     exec(compile(script,"<roc_manual_fixture>","exec"),runtime.__dict__)
+    # Reapply spy after exec: fixture definition otherwise shadows the injected spy.
+    runtime.__dict__["_spr_recovery_roc_success"]=lambda:published.append("catchup_roc")
     runtime.__dict__["roc_datetime"]=DateTime
     # Imported name is local: patch datetime module constructor in a test-only
     # sys.modules shim to ensure deterministic calendar dates.
