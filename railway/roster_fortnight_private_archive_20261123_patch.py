@@ -60,7 +60,7 @@ def _roster_history_safe_path(cache_path):
     depot,role,kind,filename=parts
     permitted_depots={"auburn","blacktown","campbelltown","central",
         "cronulla","flemington","hornsby","leppington","mortdale",
-        "north-sydney","penrith","richmond","waterfall"}
+        "north-sydney","northsydney","penrith","richmond","waterfall"}
     if depot not in permitted_depots or role not in ("drivers","guards") or kind not in ("daily","fortnight","period"):
         raise ValueError("Unexpected roster depot, crew or period")
     if not re.fullmatch(r"[A-Za-z0-9-]{5,45}\.pdf",filename):
@@ -80,11 +80,11 @@ def _roster_history_remote_copy(ssh,public,private,cache_path,start,expected_sha
     # original published PDF is checked before and after local server copy.
     script=("set -eu;"+
        "test -f "+src+";"+
-       "echo '"+expected_sha+"  ' "+src+" | sha256sum -c - >/dev/null;"+
+       "printf '%s  %s\\n' "+expected+" "+src+" | sha256sum -c - >/dev/null;"+
        "install -d -m 700 "+folder+";"+
-       "if test -s "+dst+" && echo '"+expected_sha+"  ' "+dst+" | sha256sum -c - >/dev/null 2>&1;then echo ROSTER_ARCHIVE_UNCHANGED;"+
+       "if test -s "+dst+" && printf '%s  %s\\n' "+expected+" "+dst+" | sha256sum -c - >/dev/null 2>&1;then echo ROSTER_ARCHIVE_UNCHANGED;"+
        "else cp -- "+src+" "+tmp+";chmod 600 "+tmp+";"+
-       "echo '"+expected_sha+"  ' "+tmp+" | sha256sum -c - >/dev/null;"+
+       "printf '%s  %s\\n' "+expected+" "+tmp+" | sha256sum -c - >/dev/null;"+
        "mv -f "+tmp+" "+dst+";echo ROSTER_ARCHIVE_SAVED;fi")
     stdin,stdout,stderr=ssh.exec_command(script,timeout=45)
     stdout.channel.settimeout(120)
