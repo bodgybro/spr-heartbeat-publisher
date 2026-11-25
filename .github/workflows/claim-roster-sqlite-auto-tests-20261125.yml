@@ -1,0 +1,19 @@
+name: Test automatic roster SQLite index hook
+on:
+  push:
+    paths:
+      - .github/workflows/claim-roster-sqlite-auto-tests-20261125.yml
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify index hook after archive and failure isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile railway/claim_roster_sqlite_auto_20261125_patch.py
+          python3 railway/claim_roster_sqlite_auto_20261125_test.py
