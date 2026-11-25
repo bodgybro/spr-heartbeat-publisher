@@ -1,0 +1,19 @@
+name: Test failed-only roster retry checkpoint
+on:
+  push:
+    paths:
+      - .github/workflows/roster-failed-only-retry-tests-20261125.yml
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify failed-only retry and dual-site manifest safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile railway/roster_failed_only_retry_20261125_patch.py
+          python3 railway/roster_failed_only_retry_20261125_test.py
